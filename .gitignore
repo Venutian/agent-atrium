@@ -1,0 +1,27 @@
+node_modules
+dist
+
+# Your office: which repo has which room, what you archived, and the launcher's logs. Holds
+# the names and paths of the repos you work in, so it stays out of the repository.
+data/
+
+# Per-machine Claude Code permissions — personal paths live in here.
+.claude/settings.local.json
+
+# Raw asset packs. The built glbs in public/assets are checked in instead; see
+# tools/build-assets.mjs for how to rebuild them.
+assets-src
+
+.DS_Store
+*.log
+
+# Browser-automation scratch: screenshots and console logs from checking the page.
+.playwright-mcp/
+
+# Sound samples. The game synthesises every sound it needs, so nothing here is required;
+# files dropped in alongside a manifest.json override the synth by name. Kept out of the
+# repository because the samples people use (Splice, most stock libraries) are licensed for
+# use in a work, not for redistribution on their own.
+public/audio/*
+!public/audio/README.md
+public/dev-mobile.html
