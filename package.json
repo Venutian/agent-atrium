@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Your coding-agent threads as bots in a glass office.",
+  "description": "Your coding-agent threads as bots in a glass office: a live 3D dashboard for Claude Code, Codex, VS Code, Cursor and OpenCode sessions.",
+  "homepage": "https://github.com/Venutian/agent-atrium#readme",
   "license": "MIT",
   "author": "Yoel Mebrahtu",
   "contributors": [
@@ -19,11 +20,19 @@
   "keywords": [
     "claude-code",
     "codex",
+    "cursor",
+    "opencode",
+    "vscode",
     "coding-agent",
+    "ai-agents",
+    "agent-dashboard",
+    "agent-monitor",
     "three.js",
     "webgl",
+    "3d",
     "developer-tools",
-    "visualization"
+    "visualization",
+    "local-first"
   ],
   "engines": {
     "node": ">=22.13"
@@ -38,11 +47,11 @@
     "build": "npm run assets --silent && vite build",
     "start": "npm run build && node server/serve.mjs",
     "serve": "node server/serve.mjs",
+    "demo": "npm run build && node server/serve.mjs --demo",
     "assets": "node tools/build-assets.mjs",
     "test": "node --test \"test/**/*.test.mjs\""
   },
   "dependencies": {
-    "@mdi/js": "^7.4.47",
     "three": "^0.185.0"
   },
   "devDependencies": {

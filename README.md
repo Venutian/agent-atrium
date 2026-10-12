@@ -1,6 +1,36 @@
-# Agent Atrium
+<h1 align="center">Agent Atrium</h1>
 
-Your coding-agent threads, as bots in a glass office.
+<p align="center">
+  <strong>Your coding-agent threads, as bots in a glass office.</strong><br>
+  A live 3D view of every Claude Code, Codex, VS Code, Cursor and OpenCode session on your machine.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Venutian/agent-atrium/actions/workflows/ci.yml"><img alt="Test and build" src="https://github.com/Venutian/agent-atrium/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-2f7d6d"></a>
+  <img alt="Node 22.13 or newer" src="https://img.shields.io/badge/node-%E2%89%A522.13-3c873a">
+  <img alt="Windows, macOS and Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4b6a88">
+  <img alt="Local only" src="https://img.shields.io/badge/data-stays%20on%20your%20machine-6b5ca5">
+</p>
+
+<p align="center">
+  <img src="docs/images/hero.png" alt="The Glass Studio office: hexagonal glass rooms, one per repository, with small monitor-headed bots at their desks. Badges float over them: a keyboard for typing, a question mark for waiting on you, an exclamation mark for an error, a tick for a merged pull request." width="100%">
+</p>
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/staff-badge.png" alt="A bot's staff badge: its repository, thread title, agent, status, branch, model and recorded tokens, with Open, Viewed and Archive buttons."></td>
+    <td width="33%"><img src="docs/images/atlas-hq.png" alt="Director Atlas's office: a daily briefing with the agents that are blocked or waiting, and counts of who is on shift."></td>
+    <td width="33%"><img src="docs/images/neon-night.png" alt="The same office in the Neon Night style: dark floor, glowing room outlines and bots lit by their status halos."></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Click a bot for its staff badge</sub></td>
+    <td align="center"><sub>Director Atlas's HQ</sub></td>
+    <td align="center"><sub>Neon Night, one of five office styles</sub></td>
+  </tr>
+</table>
+
+<p align="center"><sub>Screenshots are of the built-in demo office (<code>npm run demo</code>), not anyone's real work.</sub></p>
 
 Every thread on this machine — Claude Code, Codex, VS Code chat and more — is a small bot.
 Each repo gets its own glass room on an open office floor, with a desk for every thread. New
@@ -13,6 +43,21 @@ The scanner reads the agents' own files on your machine and uploads nothing. Age
 has no account and never edits those files itself. Your layout is saved in `data/atrium.json`.
 A message you send a bot goes through that agent's own CLI and configured model provider;
 the CLI records the turn in its session and uses your existing account and permissions.
+
+## Try the demo
+
+No agents installed, or just curious? The demo office fills the floor with made-up threads in
+made-up repos:
+
+```bash
+git clone https://github.com/Venutian/agent-atrium.git
+cd agent-atrium
+npm install
+npm run demo     # then open http://localhost:5275
+```
+
+The demo keeps its own layout in `data/demo/` and never reads your agents' files. Its bots
+cannot be opened or messaged.
 
 ## Run it
 
@@ -32,6 +77,17 @@ every shortcut away again.
 The shortcut starts the server hidden if it is not already running, then opens the page. After
 a `git pull` it rebuilds and restarts only what changed, so the next click picks up new code.
 Logs and errors are in `data/`.
+
+**Ubuntu and other Linux desktops.** Once, in the project folder:
+
+```bash
+npm ci
+node tools/install-linux.mjs     # --no-startup to skip login, --remove to undo
+```
+
+That adds **Agent Atrium** to the application menu and starts it in the background when you
+log in. `tools/launch.sh` is the launcher it uses: it rebuilds what changed, starts the server
+for this checkout only, and opens the page. `tools/launch.sh --stop` stops it.
 
 **Any platform, from a terminal:**
 
@@ -62,10 +118,39 @@ a rim light in a second colour that outlines the bots, and a touch of depth of f
 
 Every style is the same office. Your rooms, bots and layout stay put when you switch.
 
+## Director Atlas's HQ
+
+Beside the status board in the commons sits **Atlas**, the office director, in a glass hex office
+of their own. Click Atlas, the status board, or **Visit Atlas · HQ** in the panel to step inside.
+Everything in it comes from real local data; nothing in it is simulated or written by a model.
+
+- **Daily briefing:** who is on shift, who needs a decision and who is ready for review, with a
+  button to fly to each one.
+- **Energy lab:** recorded tokens per day for the last 14 days (UTC), by model, plus an optional
+  daily token budget and an alert when a provider's reported allowance runs low.
+- **Mission board:** search every bot by task, repo, model, branch or status, and write a
+  handoff from one agent to another. A mission is a sealed briefing you review, then deliver to
+  the receiving agent's app yourself. No model is ever run for you. Completing a mission earns
+  office XP.
+- **Chronicle:** what changed and when: arrivals, status changes, missions, merged PRs and
+  failed builds. It keeps the last 500 events.
+- **Workshop:** a read-only health check per repo: branch, uncommitted changes, the pull request
+  and its CI checks through your own `gh` login, and the local model servers it can see (Ollama,
+  LM Studio) with NVIDIA GPU memory. The same reading shows on each room's sign.
+
+Local test results are never run for you. To show them, have your test script write
+`.agent-atrium/health.json` in the repo:
+
+```json
+{ "tests": "passed", "updatedAt": 1760262000000 }
+```
+
+`tests` is `passed`, `failed` or `running`. A report older than a day is marked as old.
+
 ## Office stats
 
-Click **Office stats** below the status counters for recorded tokens by assistant, model and
-repository. Bot badges also show input/output, cached input and context headroom when reported.
+The **Energy lab** in Atlas's HQ shows recorded tokens by assistant, model and repository. Bot
+badges also show input/output, cached input and context headroom when reported.
 The view includes scanned hidden and archived sessions; it excludes helper/subagent logs and
 cloud-only work. Totals are local session records, not a billing statement. Forked sessions may
 repeat inherited history, and providers may omit some usage.
@@ -94,13 +179,16 @@ you check the authoritative account view yourself.
   blue while it waits on you, a stalled red on an error, gold when its work shipped.
 - **The bots.** Each has a monitor for a head, its face on an LED screen behind glass, with a
   halo floating above it and light rings round its ears, both in its status colour, so you
-  can read the whole floor from straight above. Body colour is the agent: Claude Code bots are
-  orange, Codex bots are black, and everything else is blue.
+  can read the whole floor from straight above. Below it is a hard-shell body: a chest plate
+  with a status lamp, a jointed waist, ball joints, gauntlet forearms, mitts and boots. Shell
+  colour is the agent: Claude Code bots are orange, Codex bots are black, and everything else
+  is blue.
 - **Badges are the status.** `?` waiting on you, `!` hit an error, a keyboard means typing at
   its desk right now, `✓` its pull request landed. A bot with no badge is idle. One that has been
   quiet for three days dozes off by its desk, and so does one whose error is days old.
 - **The commons** around reception has a lounge, a coffee bar, a water cooler, a ping-pong table,
-  an arcade cabinet and a status board showing who is at work, who needs you and who is stuck.
+  an arcade cabinet, Director Atlas's glass office, and a status board showing who is on shift,
+  open missions, low allowances and today's tokens.
 - **The open floor** around the rooms has potted trees with bench rings, lamp posts, plant
   clusters and the odd sculpture, with glowing specks drifting through the air.
 - **Delivery drones** carry parcels from reception to the desks.
@@ -205,23 +293,31 @@ Every agent that is installed shows up at once. To add a new one in code, see
   itself if frames get slow.
 - **Max bots** caps how many are drawn. The ones that need you are always kept.
 - **Delivery drones**: off, some or full.
-- **Sound**: a quiet room tone, typing where work is happening, drones going past, and a chime
-  when a bot starts waiting on you. It is on, but silent until your first click, as browsers
-  require.
+- **Sound**: a working office, made live in the browser with no audio files: ventilation,
+  people talking somewhere across the floor, the odd mug, chair or printer, typing where bots
+  are working, drones going past, and a soft glass bell when a bot starts waiting on you. After
+  dark the talk thins out. It is on, but silent until your first click, as browsers require.
+  To use your own recordings, see [public/audio/README.md](public/audio/README.md).
 
 ## Credits and licence
 
 Agent Atrium is a fork of [Bot Crossing](https://github.com/Station-Sciences/bot-crossing) by
 **Jarren Rocks**, used under the MIT licence. It is not affiliated with or endorsed by that
-project. The office, its desks, commons and styles, the interface, messaging and the bots'
-monitor-head design are this project's own.
+project. The office, its desks, commons and styles, the interface and its icons, the status
+badges, the sound, messaging, Atlas's HQ and the bots' design, head and body, are this
+project's own.
 
-The code is [MIT](LICENSE). The bots' body and animations in `public/assets/` come from
+The code is [MIT](LICENSE). The bots' skeleton and animations in `public/assets/` come from
 **[Kay Lousberg](https://kaylousberg.com)**'s CC0
 [Character Animations](https://kaylousberg.itch.io/kaykit-character-animations) pack. The
 interface type is Barlow and Barlow Semi Condensed by Jeremy Tribby, under the
-[SIL Open Font License](public/fonts/OFL.txt). The status badges are
-[Material Design Icons](https://pictogrammers.com/library/mdi/) (Apache-2.0). See
-[CREDITS.md](public/assets/CREDITS.md).
+[SIL Open Font License](public/fonts/OFL.txt). See [CREDITS.md](public/assets/CREDITS.md).
+
+## Contributing
+
+Issues and pull requests are welcome. `npm test` runs the suite, and `npm run demo` gives you an
+office to try changes against. To teach the office a new agent, start with
+[server/harnesses/README.md](server/harnesses/README.md). If you like it, a star helps other
+people find it.
 
 Not affiliated with Anthropic, OpenAI, Microsoft, Google or any other agent vendor.

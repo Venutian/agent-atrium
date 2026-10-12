@@ -2,9 +2,19 @@ import http from 'node:http'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { apiMiddleware } from './api.mjs'
 import { createWriteStream } from 'node:fs'
 import { Console } from 'node:console'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+
+// `--demo` serves made-up threads with a layout of its own (see demo.mjs). Set before the API
+// loads, because its modules read these once, at import.
+if (process.argv.includes('--demo')) {
+  process.env.AGENT_ATRIUM_DEMO = '1'
+  process.env.AGENT_ATRIUM_DATA ||= path.join(here, '..', 'data', 'demo')
+  process.env.PORT ||= '5275'
+}
+const { apiMiddleware } = await import('./api.mjs')
 
 // Detached Windows launches log directly; redirecting their pipes from PowerShell can
 // keep the launcher waiting for the lifetime of the server.
@@ -17,7 +27,6 @@ if (process.env.AGENT_ATRIUM_LOG_DIR) {
   process.on('warning', (warning) => console.warn(warning.message))
 }
 
-const here = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.join(here, '..', 'dist')
 const PORT = Number(process.env.PORT) || 5274
 const HOST = process.env.AGENT_ATRIUM_HOST || '127.0.0.1'

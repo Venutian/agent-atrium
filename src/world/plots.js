@@ -675,6 +675,8 @@ export function createLabel(text, accent, style, pixelRatio = 4) {
     const key = JSON.stringify(health)
     if (key === healthKey) return
     healthKey = key
+    // No folder or no Git to read: a sign of question marks says less than the default line.
+    if (!health?.branch) health = null
     const color = health?.status === 'blocked' ? 0xe86f62 : health?.status === 'shipped' ? 0x46bb87 : health?.status === 'in-progress' ? 0xe0ac50 : accent
     const status = health?.checks !== 'unknown' && health?.checks ? `CI ${health.checks}` : health?.tests !== 'unknown' && health?.tests ? `TESTS ${health.tests}${health.testsStale ? ' (OLD)' : ''}` : 'CHECKS ?'
     draw(health ? `${health.branch || 'BRANCH ?'} · ${health.changedFiles ?? '?'} CHANGES · ${status}` : undefined, color)
