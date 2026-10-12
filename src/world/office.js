@@ -131,6 +131,40 @@ export function planterSpots(centers, radius, style) {
   return spots
 }
 
+/** How far the coffee corner reaches from its middle: its island and the mugs on it. */
+export const COFFEE_RADIUS = 0.8
+
+/**
+ * A room's coffee corner: a round island with an espresso machine, a stack of mugs and a
+ * pendant lamp over it in the room's colour. Idle bots gather round it on their break.
+ */
+export function createCoffeeCorner(style, accent) {
+  const f = furniture()
+  const wood = style.furniture?.wood ?? 0xb98a5a
+  f.add(new THREE.CylinderGeometry(0.62, 0.66, 0.86, 24), wood, 0, 0.43, 0)
+  f.add(new THREE.CylinderGeometry(0.74, 0.74, 0.06, 28), 0xf2efe8, 0, 0.89, 0)
+  // The machine: body, group head, drip tray, a lit panel in the room's colour.
+  f.box(0.46, 0.44, 0.36, 0x2e333b, 0, 1.14, -0.12)
+  f.box(0.5, 0.06, 0.4, 0x8b929c, 0, 1.39, -0.12)
+  f.box(0.12, 0.08, 0.12, 0xb7bcc4, 0, 1.0, 0.1)
+  f.box(0.3, 0.02, 0.18, 0x8b929c, 0, 0.93, 0.14)
+  f.box(0.3, 0.07, 0.02, accent, 0, 1.28, 0.065)
+  // Mugs round the rim, and a jar of beans.
+  for (let i = 0; i < 5; i++) {
+    const a = 0.9 + i * 0.75
+    f.add(new THREE.CylinderGeometry(0.055, 0.048, 0.11, 12), i % 2 ? accent : 0xf2efe8, Math.cos(a) * 0.52, 0.975, Math.sin(a) * 0.52)
+  }
+  f.add(new THREE.CylinderGeometry(0.08, 0.08, 0.2, 12), 0x6b4a33, 0.32, 1.02, -0.3)
+  // A pendant lamp over it, so a coffee corner reads from straight above.
+  f.add(new THREE.CylinderGeometry(0.012, 0.012, 1.3, 6), 0x2e333b, 0, 2.55, 0)
+  f.add(new THREE.ConeGeometry(0.34, 0.26, 20, 1, true), accent, 0, 1.82, 0)
+  f.add(new THREE.SphereGeometry(0.1, 12, 8), 0xfff1cc, 0, 1.74, 0)
+  const mesh = f.finish()
+  mesh.material.side = THREE.DoubleSide
+  mesh.name = 'coffee-corner'
+  return mesh
+}
+
 /** Where new bots arrive: a stepped hexagonal courtyard with a living centrepiece. */
 export function createOfficeReception(style) {
   const f = furniture()

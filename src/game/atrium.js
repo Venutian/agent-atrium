@@ -405,7 +405,13 @@ export class Atrium {
     this._rebuildNavigation()
     for (const member of roster) {
       const entry = this.buildings.get(member.id)
-      member.site = this._workSite(this.plots.get(entry.plot), entry, entry.slot)
+      const plot = this.plots.get(entry.plot)
+      if (member.status === 'idle' && plot.breakSpot) {
+        // On a break: round the room's coffee corner, at a spot keyed by its desk's slot so
+        // it does not change places whenever somebody else wanders over.
+        member.site = this._clearSpot(plot, plot.breakSpot(entry.slot))
+        member.anchor = plot.coffeeWorld()
+      } else member.site = this._workSite(plot, entry, entry.slot, member.status)
     }
     this._syncFaunaSites()
     this.stats = { ...stats, done: stats.celebrating }
@@ -852,19 +858,27 @@ export class Atrium {
     }
   }
 
-  /** Where the bot stands: just outside its building, facing in. */
-  _workSite(plot, entry, index) {
+  /** A spot on the plot, moved to the nearest clear ground if something stands on it. */
+  _clearSpot(plot, spot) {
+    const site = new THREE.Vector3(spot.x, 0, spot.z)
+    if (this.nav && (this.nav.isBlocked(site.x, site.z) || this.nav.insideKeep(site.x, site.z))) {
+      const free = this.nav.nearestClear(site.x, site.z, 2, (x, z) => plot.containsWorld(x, z))
+      if (free) site.set(free.x, 0, free.z)
+    }
+    return site
+  }
+
+  /**
+   * Where the bot goes at its desk: into the chair while it works, and just behind the
+   * chair for everything else — waiting on you, stuck, celebrating or dozing.
+   */
+  _workSite(plot, entry, index, status = 'working') {
     const b = entry.mesh.position
     // A desk is worked from the front, at the screens.
     if (entry.mesh.userData.stand) {
       const ry = entry.mesh.rotation.y
-      const stand = entry.mesh.userData.stand
-      const site = new THREE.Vector3(b.x + Math.sin(ry) * stand, 0, b.z + Math.cos(ry) * stand)
-      if (this.nav && (this.nav.isBlocked(site.x, site.z) || this.nav.insideKeep(site.x, site.z))) {
-        const free = this.nav.nearestClear(site.x, site.z, 2, (x, z) => plot.containsWorld(x, z))
-        if (free) site.set(free.x, 0, free.z)
-      }
-      return site
+      const d = status === 'working' ? entry.mesh.userData.stand : entry.mesh.userData.behind ?? entry.mesh.userData.stand
+      return this._clearSpot(plot, { x: b.x + Math.sin(ry) * d, z: b.z + Math.cos(ry) * d })
     }
     // Outward from the *middle* of the zone rather than from its root tile: the root sits
     // on one edge of a grown blob, and standing spots measured from there all point the
@@ -1070,22 +1084,26 @@ export class Atrium {
     return this.bots.pick(this.camera, ndcX, ndcY, aspect)
   }
 
-  /** The director and board share a destination; bend bounds like the renderer. */
+  /**
+   * Which HQ tab the pointer is on, if any: a screen, the trophy cabinet, Atlas or the status
+   * board. Bounds are bent like the renderer bends them. A screen wins over anything in front
+   * of it, since Atlas's desk sits right under the rank screen.
+   */
   pickOffice(ndcX, ndcY) {
     const ray = this._officeRay || (this._officeRay = new THREE.Raycaster())
     ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera)
     const box = new THREE.Box3(), bentBox = new THREE.Box3(), point = new THREE.Vector3(), hit = new THREE.Vector3()
-    let closest = Infinity, chosen = null
+    let best = null
     for (const target of this.commons?.targets || []) {
       target.mesh.updateWorldMatrix(true, true)
       box.setFromObject(target.mesh); bentBox.makeEmpty()
       for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) bentBox.expandByPoint(bendPoint(point.set(x, y, z)))
-      if (ray.ray.intersectBox(bentBox, hit)) {
-        const distance = hit.distanceTo(ray.ray.origin)
-        if (distance < closest) { closest = distance; chosen = target.action }
-      }
+      if (!ray.ray.intersectBox(bentBox, hit)) continue
+      const distance = hit.distanceTo(ray.ray.origin)
+      const priority = target.priority || 0
+      if (!best || priority > best.priority || (priority === best.priority && distance < best.distance)) best = { priority, distance, action: target.action }
     }
-    return chosen
+    return best?.action ?? null
   }
 
   setOfficeData(data) {

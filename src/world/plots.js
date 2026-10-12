@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { createOfficePlanters, createGlassRooms, createSignMount, planterSpots } from './office.js'
+import { createOfficePlanters, createGlassRooms, createSignMount, planterSpots, createCoffeeCorner, COFFEE_RADIUS } from './office.js'
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { withCurve } from '../core/curve.js'
 import { OVERLAY_LAYER } from '../core/engine.js'
@@ -30,11 +30,11 @@ export const PLOT_PALETTE = [
  * office reads as open plan rather than as one honeycomb. Cells of the same room are joined
  * across that gap by a bridge of floor, so a big repo is still one room.
  */
-const CELL = 9.6
+const CELL = 11.4
 /** Exported for hit-testing: on a hex lattice the nearest cell centre *is* the containing cell. */
 export const PLOT_CELL = CELL
 /** A room cell's own floor, centre to corner. */
-const TILE = 7.55
+const TILE = 8.4
 export const PLOT_TILE = TILE
 /** Top face of a room's floor — what every building, planter and pair of boots stands on. */
 export const DECK_TOP = 0.45
@@ -42,7 +42,10 @@ export const DECK_TOP = 0.45
 const DECK_SKIRT = 0.4
 /** The whole prism: the rim you can see, plus the skirt buried under it. */
 const DECK_HEIGHT = DECK_TOP + DECK_SKIRT
-/** Building slots per cell: one in the middle and six around it. */
+/**
+ * Building slots per cell: one in the middle and six around it. The root cell's middle is the
+ * room's coffee corner instead, so a room seats one fewer than its cells would suggest.
+ */
 const SLOTS_PER_CELL = 7
 const MAX_CELLS = 9
 
@@ -99,7 +102,7 @@ function hexRing(radius) {
 }
 
 const cellsNeeded = (threadCount) =>
-  Math.max(1, Math.min(MAX_CELLS, Math.ceil(threadCount / SLOTS_PER_CELL)))
+  Math.max(1, Math.min(MAX_CELLS, Math.ceil((threadCount + 1) / SLOTS_PER_CELL)))
 
 /**
  * Hand out cells to projects, keeping every zone exactly where it already is.
@@ -314,6 +317,7 @@ export class Plot {
     this._buildBorder()
     this.slots = this._buildSlots()
     this._buildPlanters()
+    this._buildCoffee()
     this._buildRooms()
   }
 
@@ -490,21 +494,54 @@ export class Plot {
   }
 
   /**
+   * The coffee corner, in the middle of the root cell: where the room's idle bots take a
+   * break. Handed to navigation like the planters, so it is walked round, not through.
+   */
+  _buildCoffee() {
+    const { x, z } = this.localCenters[0]
+    this.coffee = { x, z }
+    this.coffeeCorner = createCoffeeCorner(this.style, this.accent)
+    this.coffeeCorner.position.set(x, DECK_TOP, z)
+    this.group.add(this.coffeeCorner)
+    this.clutterSpots.push({ x, z, r: COFFEE_RADIUS })
+  }
+
+  /**
+   * Where idle bot number `index` stands on its break, in world space: rings round the
+   * coffee corner, the near ring first, staggered so the outer ring looks between heads.
+   */
+  breakSpot(index, out = new THREE.Vector3()) {
+    const rings = [[COFFEE_RADIUS + 0.85, 7], [COFFEE_RADIUS + 1.7, 12]]
+    let i = index % (rings[0][1] + rings[1][1])
+    let ring = 0
+    if (i >= rings[0][1]) { i -= rings[0][1]; ring = 1 }
+    const [r, n] = rings[ring]
+    const a = (i / n) * Math.PI * 2 + 0.35 + ring * (Math.PI / n)
+    return out.set(this.center.x + this.coffee.x + Math.cos(a) * r, DECK_TOP, this.center.z + this.coffee.z + Math.sin(a) * r)
+  }
+
+  /** The coffee corner's middle, in world space: what a bot on its break looks at. */
+  coffeeWorld(out = new THREE.Vector3()) {
+    return out.set(this.center.x + this.coffee.x, DECK_TOP, this.center.z + this.coffee.z)
+  }
+
+  /**
    * Slots, in room-local coordinates: cell centre first, then the ring around it, cell by
-   * cell. Fixed rather than random, so a session keeps its spot as siblings come and go —
-   * a building must never jump because a neighbour was archived.
+   * cell, skipping the root cell's centre, which is the coffee corner. Fixed rather than
+   * random, so a session keeps its spot as siblings come and go — a building must never jump
+   * because a neighbour was archived.
    */
   _buildSlots() {
     const slots = []
-    for (const { x, z } of this.localCenters) {
-      slots.push({ x, z })
+    this.localCenters.forEach(({ x, z }, cell) => {
+      if (cell > 0) slots.push({ x, z })
       // Toward the room's corners, not its walls: every wall has a doorway in the middle, and
       // a desk standing square in front of one turns the door into an obstacle course.
       for (let i = 0; i < 6; i++) {
         const a = (Math.PI / 3) * i
         slots.push({ x: x + Math.cos(a) * TILE * 0.58, z: z + Math.sin(a) * TILE * 0.58 })
       }
-    }
+    })
     return slots
   }
 
