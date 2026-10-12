@@ -19,14 +19,25 @@
 
 <table>
   <tr>
+    <td width="33%"><img src="docs/images/coffee-break.png" alt="Inside one room: a bot typing in its chair at a desk, one standing behind its chair waiting for a reply, and two idle bots on a coffee break round the coffee corner."></td>
     <td width="33%"><img src="docs/images/staff-badge.png" alt="A bot's staff badge: its repository, thread title, agent, status, branch, model and recorded tokens, with Open, Viewed and Archive buttons."></td>
-    <td width="33%"><img src="docs/images/atlas-hq.png" alt="Director Atlas's office: a daily briefing with the agents that are blocked or waiting, and counts of who is on shift."></td>
-    <td width="33%"><img src="docs/images/neon-night.png" alt="The same office in the Neon Night style: dark floor, glowing room outlines and bots lit by their status halos."></td>
+    <td width="33%"><img src="docs/images/atlas-hq.png" alt="Director Atlas's HQ: a glass hex office with wall screens for rank and trophies, a 14-day token chart and the mission board, two kiosks and a trophy cabinet."></td>
   </tr>
   <tr>
+    <td align="center"><sub>Working bots sit at their desks; idle ones take a coffee break</sub></td>
     <td align="center"><sub>Click a bot for its staff badge</sub></td>
-    <td align="center"><sub>Director Atlas's HQ</sub></td>
-    <td align="center"><sub>Neon Night, one of five office styles</sub></td>
+    <td align="center"><sub>Director Atlas's HQ: the stats live on its walls</sub></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/sunset-loft.png" alt="The office in the Sunset Loft style: amber light across dark timber floors."></td>
+    <td width="50%"><img src="docs/images/neon-night.png" alt="The office in the Neon Night style: dark floor, glowing room outlines and bots lit by their status halos."></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Sunset Loft</sub></td>
+    <td align="center"><sub>Neon Night</sub></td>
   </tr>
 </table>
 
@@ -112,7 +123,7 @@ a rim light in a second colour that outlines the bots, and a touch of depth of f
 | Style | Look |
 | --- | --- |
 | **Glass Studio** (default) | Pearl-white glass rooms, cool reflections and long afternoon shadows |
-| **Daylight Office** | Late-afternoon daylight on carpet and oak, soft blue shade behind white frames |
+| **Evening Office** | Late-afternoon daylight on carpet and oak, soft blue shade behind white frames |
 | **Sunset Loft** | Amber evening light across dark timber floors, an orange sky behind |
 | **Greenhouse** | Low sunlight through steel and glass, warm stone and deep leafy shadows |
 | **Neon Night** | Low moonlight, silver-blue highlights and violet edges across a dark tiled floor |
@@ -121,9 +132,22 @@ Every style is the same office. Your rooms, bots and layout stay put when you sw
 
 ## Director Atlas's HQ
 
-Beside the status board in the commons sits **Atlas**, the office director, in a glass hex office
-of their own. Click Atlas, the status board, or **Visit Atlas · HQ** in the panel to step inside.
-Everything in it comes from real local data; nothing in it is simulated or written by a model.
+Beside the status board in the commons sits **Atlas**, the office director, in a big glass hex
+office of their own. **Visit Atlas · HQ** in the panel flies you there. The office's numbers
+are on its walls, so you can read them without opening anything:
+
+- **Rank screen:** your coordinator level and XP, who is on shift, waiting or blocked, and the
+  next trophy to earn.
+- **Energy screen:** recorded tokens for each of the last 14 days, with today in gold.
+- **Mission screen:** open handoff packets and who they are for.
+- **Workshop and Chronicle kiosks** by the door: CI passing and failing, open PRs, local models
+  online, and the latest changes in the office.
+- **Trophy cabinet:** six cups that light up gold as you earn them: first handoff, mission
+  cleared, inbox zero, full house, shipped, and a million-token day.
+
+Every screen lights up under the pointer, and clicking one opens its tab of the HQ panel for
+the full details (click Atlas or the cabinet for the briefing). Everything in it comes from
+real local data; nothing is simulated or written by a model.
 
 - **Daily briefing:** who is on shift, who needs a decision and who is ready for review, with a
   button to fly to each one.
@@ -174,18 +198,23 @@ you check the authoritative account view yourself.
 
 - **A room per repo.** A busy repo grows into a bigger room, with its parts joined by floor. The
   sign on its wall is the repo's name.
-- **A desk per thread.** Each thread gets its own workstation, picked from its id: a focus desk,
-  dual or triple screens, a laptop rig, a desk with a build server, or a planning desk with a
-  whiteboard. The screens scroll code in the bot's status colour: busy green while it works, slow
+- **A desk per thread.** Each thread gets its own workstation and chair, picked from its id: a
+  focus desk, dual or triple screens, a laptop rig, a desk with a build server, or a planning
+  desk with a whiteboard. A working bot sits in its chair and types; one waiting on you, stuck
+  or celebrating stands just behind it.
+- **A coffee corner per room.** An island with an espresso machine under a lamp in the room's
+  colour. Idle bots leave their desks for a coffee break there, and walk back when their thread
+  starts working again. The screens scroll code in the bot's status colour: busy green while it works, slow
   blue while it waits on you, a stalled red on an error, gold when its work shipped.
 - **The bots.** Each has a monitor for a head, its face on an LED screen behind glass, with a
   halo floating above it and light rings round its ears, both in its status colour, so you
-  can read the whole floor from straight above. Below it is a hard-shell body: a chest plate
-  with a status lamp, a jointed waist, ball joints, gauntlet forearms, mitts and boots. Shell
+  can read the whole floor from straight above. Below it is a chunky, toy-like hard-shell body:
+  a round chest with a status lamp, a jointed waist, ball joints, gauntlets, big mitts and boots. Shell
   colour is the agent: Claude Code bots are orange, Codex bots are black, and everything else
   is blue.
 - **Badges are the status.** `?` waiting on you, `!` hit an error, a keyboard means typing at
-  its desk right now, `✓` its pull request landed. A bot with no badge is idle. One that has been
+  its desk right now, `✓` its pull request landed. A bot with no badge is idle, on its coffee
+  break. One that has been
   quiet for three days dozes off by its desk, and so does one whose error is days old.
 - **The commons** around reception has a lounge, a coffee bar, a water cooler, a ping-pong table,
   an arcade cabinet, Director Atlas's glass office, and a status board showing who is on shift,
