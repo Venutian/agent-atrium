@@ -2,7 +2,8 @@
 
 <p align="center">
   <strong>Your coding-agent threads, as bots in a glass office.</strong><br>
-  A live 3D view of every Claude Code, Codex, VS Code, Cursor and OpenCode session on your machine.
+  A live 3D agent office and workspace for every Claude Code, Codex, VS Code, Cursor and OpenCode
+  session on your machine: a multi-agent dashboard you can walk around in.
 </p>
 
 <p align="center">
