@@ -39,7 +39,7 @@ export function createNoiseBuffers(ctx) {
   for (let i = 0; i < total; i++) {
     const w = Math.random() * 2 - 1
     white[i] = w
-    // Paul Kellet's pink filter: cheap, and flat enough for wind.
+    // Paul Kellet's pink filter: cheap, and flat enough for air.
     b0 = 0.99886 * b0 + w * 0.0555179
     b1 = 0.99332 * b1 + w * 0.0750759
     b2 = 0.969 * b2 + w * 0.153852
@@ -218,7 +218,7 @@ function envelope(param, now, peak, attack, decay, hold = 0) {
 
 /**
  * One FM chirp: a sine that glides from `f0` to `f1`, optionally wobbled by a modulator, with
- * an attack/decay. Every bird here is a handful of these with a different contour.
+ * an attack/decay. Every blip here is one or two of these.
  */
 function chirp(ctx, dest, when, o) {
   const g = gain(ctx, 0, dest)
@@ -247,13 +247,14 @@ function chirp(ctx, dest, when, o) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The room-tone bed: a looping layer, cheap, driven a little from `update` so it never sits still.
+// The beds: looping layers, cheap, driven a little from `update` so they never sit still.
 
 /**
- * Noise through a lowpass whose cutoff wanders. The random walk lives in `update`, not in an
- * LFO node, because wind is not periodic — the moment it is, you hear the loop.
+ * Noise through a lowpass whose cutoff wanders: moving air. The random walk lives in
+ * `update`, not in an LFO node, because air is not periodic — the moment it is, you hear
+ * the loop.
  */
-class WindVoice extends Voice {
+class AirVoice extends Voice {
   constructor(ctx, dest, noise, o) {
     super(ctx, dest)
     this.lo = o.lo
@@ -327,29 +328,70 @@ class TypingVoice extends Voice {
   }
 }
 
-/** A rotor: sine plus a little saw, amplitude-modulated at the blade-pass rate. */
-class DroneVoice extends Voice {
+/**
+ * A distant room of people: speech-band noise shaped into syllables by two independent
+ * talkers, each a run of short swells with pauses between phrases. Too far off and too
+ * filtered to be words, which is what an open-plan office sounds like from across the floor.
+ */
+class MurmurVoice extends Voice {
   constructor(ctx, dest, noise, o) {
     super(ctx, dest)
     this.base = o.base
+    this.out.gain.value = 1
+    this.talkers = [[480, 1250], [620, 1650]].map(([low, high]) => {
+      const level = this.node(gain(ctx, 0, this.out))
+      for (const [freq, q] of [[low, 1.1], [high, 1.6]]) {
+        const bp = this.node(filter(ctx, 'bandpass', freq, q))
+        bp.connect(level)
+        this.source(looped(ctx, noise.pink, bp))
+      }
+      return { level, next: ctx.currentTime + rand(0, 2), left: 0 }
+    })
+  }
+
+  update(dt, now) {
+    for (const t of this.talkers) {
+      while (t.next < now + 0.3) {
+        const at = Math.max(t.next, now)
+        if (t.left <= 0) {
+          // A phrase: four to twelve syllables, after a pause to listen.
+          t.left = Math.floor(rand(4, 13))
+          t.next = at + rand(0.6, 2.8)
+          continue
+        }
+        const dur = rand(0.09, 0.22)
+        t.level.gain.setTargetAtTime(this.base * rand(0.45, 1), at, 0.025)
+        t.level.gain.setTargetAtTime(0, at + dur, 0.05)
+        t.left--
+        t.next = at + dur + rand(0.03, 0.09)
+      }
+    }
+  }
+}
+
+/**
+ * A small quadcopter: four rotors a few hertz apart, so they beat against each other the way
+ * real props do, plus a breath of air off the blades.
+ */
+const ROTORS = [236, 239, 243, 247]
+class RotorVoice extends Voice {
+  constructor(ctx, dest, noise, o) {
+    super(ctx, dest)
     const now = ctx.currentTime
-    const lp = this.node(filter(ctx, 'lowpass', 2400, 0.7))
+    const lp = this.node(filter(ctx, 'lowpass', 1500, 0.8))
     lp.connect(this.out)
-    const am = this.node(gain(ctx, 0.65, lp))
-    const depth = this.node(gain(ctx, 0.35, am.gain))
-    this.source(osc(ctx, 'sine', 55, depth, now))
-    this.sine = this.source(osc(ctx, 'sine', 210, am, now))
-    const sawMix = this.node(gain(ctx, 0.22, am))
-    this.saw = this.source(osc(ctx, 'sawtooth', 210, sawMix, now))
+    this.rotors = ROTORS.map((freq) => this.source(osc(ctx, 'triangle', freq, this.node(gain(ctx, 0.22, lp)), now)))
+    const air = this.node(filter(ctx, 'bandpass', 950, 0.9))
+    air.connect(this.node(gain(ctx, 0.18, this.out)))
+    this.source(looped(ctx, noise.pink, air))
     this.out.gain.value = o.base
   }
 
   setLevel(level) {
-    // Throttle pitches the rotor up a touch; the pool sets the loudness itself.
-    const f = 210 * (0.92 + 0.16 * level)
+    // Throttle pitches the rotors up a touch; the pool sets the loudness itself.
     const now = this.ctx.currentTime
-    this.sine.frequency.setTargetAtTime(f, now, 0.3)
-    this.saw.frequency.setTargetAtTime(f, now, 0.3)
+    const k = 0.93 + 0.14 * level
+    this.rotors.forEach((r, i) => r.frequency.setTargetAtTime(ROTORS[i] * k, now, 0.3))
   }
 }
 
@@ -357,65 +399,120 @@ class DroneVoice extends Voice {
 // One-shots. Each is a function (ctx, dest, now, level) → end time, wrapped into a Voice.
 
 const ONE_SHOTS = {
+  /** The parcel lands: a soft cardboard thump, then the drone's latch letting go. */
   droneDrop(ctx, dest, now, level, noise) {
-    const g = gain(ctx, 0, dest)
-    const o = osc(ctx, 'square', 2400, g, now)
-    o.stop(envelope(g.gain, now, level * 0.12, 0.002, 0.03) + 0.02)
-    const hp = filter(ctx, 'highpass', 4000, 0.8)
-    const ng = gain(ctx, 0, dest)
-    hp.connect(ng)
-    burst(ctx, noise.white, hp, now, 0.02)
-    envelope(ng.gain, now, level * 0.25, 0.001, 0.02)
-    chirp(ctx, dest, now + 0.09, { f0: 140, f1: 55, dur: 0.1, gain: level * 0.8, attack: 0.004, decay: 0.12 })
-    return now + 0.4
+    const lp = filter(ctx, 'lowpass', 420, 0.7)
+    const thump = gain(ctx, 0, dest)
+    lp.connect(thump)
+    burst(ctx, noise.brown, lp, now, 0.12)
+    envelope(thump.gain, now, level * 0.9, 0.004, 0.14)
+    const click = gain(ctx, 0, dest)
+    const bp = filter(ctx, 'bandpass', 3200, 2)
+    bp.connect(click)
+    burst(ctx, noise.white, bp, now + 0.11, 0.015)
+    envelope(click.gain, now + 0.11, level * 0.35, 0.001, 0.02)
+    return now + 0.35
   },
   /**
-   * Two soft marimba-ish notes a fifth apart. The one sound allowed to interrupt, so it is
-   * built to be un-hateable: slow attack, a long even decay, nothing above the fourth partial.
+   * Somebody needs you: a three-note glass bell, rising. Soft attack, and inharmonic partials
+   * that die first, so it reads as a bell on a desk rather than an alarm.
    */
   chime(ctx, dest, now, level) {
-    const note = (f, t) => {
+    let end = now
+    for (const [f, t] of [[880, 0], [1108.73, 0.11], [1318.51, 0.22]]) {
+      const at = now + t
       const g = gain(ctx, 0, dest)
-      const a = osc(ctx, 'sine', f, g, t)
-      const pg = gain(ctx, 0.22, g)
-      const p = osc(ctx, 'sine', f * 4, pg, t)
-      pg.gain.setTargetAtTime(0, t + 0.02, 0.12) // the bright partial dies first
-      const end = envelope(g.gain, t, level, 0.02, 1.4)
+      const a = osc(ctx, 'sine', f, g, at)
+      const pg = gain(ctx, 0.16, g)
+      const p = osc(ctx, 'sine', f * 2.76, pg, at)
+      pg.gain.setTargetAtTime(0, at + 0.01, 0.08)
+      end = envelope(g.gain, at, level * 0.55, 0.012, 1.1)
       a.stop(end + 0.05)
       p.stop(end + 0.05)
-      return end
     }
-    note(523.25, now)
-    return note(783.99, now + 0.22)
+    return end
+  },
+  /** A mug set down across the room: a ceramic tap, and now and then the little rebound. */
+  mugClink(ctx, dest, now, level, noise) {
+    const tap = (at, l) => {
+      for (const [f, d, a] of [[2350, 0.22, 1], [3710, 0.14, 0.6], [5160, 0.09, 0.35]]) {
+        const g = gain(ctx, 0, dest)
+        osc(ctx, 'sine', f * rand(0.97, 1.03), g, at).stop(envelope(g.gain, at, l * a * 0.18, 0.001, d) + 0.02)
+      }
+      const n = gain(ctx, 0, dest)
+      const hp = filter(ctx, 'highpass', 5000, 0.7)
+      hp.connect(n)
+      burst(ctx, noise.white, hp, at, 0.01)
+      envelope(n.gain, at, l * 0.12, 0.001, 0.012)
+    }
+    tap(now, level)
+    if (Math.random() < 0.5) tap(now + rand(0.07, 0.12), level * 0.4)
+    return now + 0.5
+  },
+  /** An office chair pushed back: casters rolling on carpet, and a short creak. */
+  chairRoll(ctx, dest, now, level, noise) {
+    const bp = filter(ctx, 'bandpass', rand(220, 320), 0.7)
+    const roll = gain(ctx, 0, dest)
+    bp.connect(roll)
+    burst(ctx, noise.pink, bp, now, 1.1)
+    roll.gain.setValueAtTime(0, now)
+    roll.gain.linearRampToValueAtTime(level * 0.5, now + 0.25)
+    roll.gain.setTargetAtTime(0, now + 0.55, 0.12)
+    const creak = filter(ctx, 'bandpass', 900, 7)
+    const cg = gain(ctx, 0, dest)
+    creak.connect(cg)
+    const saw = osc(ctx, 'sawtooth', 175, creak, now + 0.05)
+    saw.frequency.setValueAtTime(175, now + 0.05)
+    saw.frequency.linearRampToValueAtTime(140, now + 0.3)
+    saw.stop(envelope(cg.gain, now + 0.05, level * 0.12, 0.02, 0.2, 0.1) + 0.02)
+    return now + 1.2
+  },
+  /** The printer by the commons: a motor spins up and paper feeds through in short pulls. */
+  printer(ctx, dest, now, level, noise) {
+    const motor = gain(ctx, 0, dest)
+    const lp = filter(ctx, 'lowpass', 380, 0.8)
+    lp.connect(motor)
+    osc(ctx, 'sawtooth', 92, lp, now).stop(now + 2.4)
+    motor.gain.setValueAtTime(0, now)
+    motor.gain.linearRampToValueAtTime(level * 0.25, now + 0.3)
+    motor.gain.setTargetAtTime(0, now + 2, 0.1)
+    const feed = gain(ctx, 0, dest)
+    const bp = filter(ctx, 'bandpass', 1800, 1.2)
+    bp.connect(feed)
+    burst(ctx, noise.white, bp, now + 0.35, 1.7)
+    feed.gain.setValueAtTime(0, now)
+    for (let t = now + 0.35; t < now + 2; t += 0.11) {
+      feed.gain.setTargetAtTime(level * 0.16, t, 0.01)
+      feed.gain.setTargetAtTime(0, t + 0.06, 0.015)
+    }
+    return now + 2.5
+  },
+  /** Somebody across the floor typing a quick line. */
+  distantKeys(ctx, dest, now, level, noise) {
+    let t = now
+    for (let i = Math.floor(rand(6, 16)); i > 0; i--) {
+      const g = gain(ctx, 0, dest)
+      const bp = filter(ctx, 'bandpass', rand(1800, 2800), 1.4)
+      bp.connect(g)
+      burst(ctx, noise.white, bp, t, 0.016)
+      envelope(g.gain, t, level * rand(0.12, 0.22), 0.001, 0.022)
+      t += Math.random() < 0.15 ? rand(0.2, 0.35) : rand(0.07, 0.12)
+    }
+    return t + 0.1
   },
 }
 
 /**
- * A robot's word: a run of short square-ish chirps, each gliding from one pitch to the next
- * with a hair of space between them. The tables are [from Hz, to Hz, seconds] per syllable.
+ * What a bot says when you click it: two or three soft blips on a pentatonic scale, each
+ * sliding up into its note with a glassy overtone on top. The table is [Hz, seconds] per blip.
  */
-function robotPhrase(syllables) {
-  return (ctx, dest, now, level) => {
-    let t = now
-    for (const [f0, f1, dur] of syllables) {
-      chirp(ctx, dest, t, { f0, f1, dur, gain: level * 0.5, attack: 0.008, decay: dur * 0.9 })
-      t += dur + 0.035
-    }
-    return t + 0.15
-  }
-}
-
-/**
- * A little robot's beep-boop: round sine blips, each with a soft octave partial and a hair
- * of pitch droop at the end, like a toy. The table is [Hz, seconds] per blip.
- */
-function beepBoop(blips) {
+function botBlip(blips) {
   return (ctx, dest, now, level) => {
     let t = now
     for (const [f, dur] of blips) {
-      chirp(ctx, dest, t, { f0: f, f1: f * 0.94, dur, gain: level * 0.42, attack: 0.006, decay: dur * 0.7 })
-      chirp(ctx, dest, t, { f0: f * 2, f1: f * 1.9, dur: dur * 0.6, gain: level * 0.09, attack: 0.004, decay: dur * 0.4 })
-      t += dur + 0.05
+      chirp(ctx, dest, t, { type: 'triangle', f0: f * 0.94, f1: f, dur, gain: level * 0.5, attack: 0.006, decay: dur * 0.8 })
+      chirp(ctx, dest, t, { f0: f * 3, f1: f * 3 * 1.001, dur: dur * 0.5, gain: level * 0.06, attack: 0.003, decay: dur * 0.4 })
+      t += dur + 0.045
     }
     return t + 0.12
   }
@@ -434,21 +531,26 @@ function oneShot(fn) {
 // The generator table the registry points at. Each is (ctx, dest, opts, noise) → Voice.
 
 export const GENERATORS = {
-  // The office's own air: ventilation in a big room, brown noise kept low and slow, so the
-  // quiet is a place rather than a dead tab.
-  'room-tone': (ctx, d, o, n) => new WindVoice(ctx, d, n, { lo: 140, hi: 420, base: 0.2, swell: 0.18, rate: 0.25, noise: 'brown' }),
+  // The office's own air: ventilation hiss in a big room, pink noise kept narrow and slow,
+  // so the quiet is a place rather than a dead tab.
+  'room-tone': (ctx, d, o, n) => new AirVoice(ctx, d, n, { lo: 620, hi: 880, base: 0.12, swell: 0.08, rate: 0.12, noise: 'pink' }),
+  'office-murmur': (ctx, d, o, n) => new MurmurVoice(ctx, d, n, { base: 0.1 }),
 
   // One-shots
   'drone-drop': oneShot(ONE_SHOTS.droneDrop),
-  'select-1': oneShot(robotPhrase([[880, 1320, 0.09], [1320, 1180, 0.12]])),
-  'select-2': oneShot(beepBoop([[1318, 0.08], [659, 0.13]])), // beep, boop
-  'select-3': oneShot(beepBoop([[784, 0.07], [1046, 0.07], [1568, 0.11]])), // boo-dee-beep
-  'select-4': oneShot(robotPhrase([[520, 780, 0.08], [780, 1040, 0.08], [1040, 1300, 0.12]])),
-  'select-5': oneShot(robotPhrase([[980, 980, 0.07], [980, 980, 0.07], [1470, 1240, 0.14]])),
-  'select-6': oneShot(robotPhrase([[1200, 900, 0.1], [600, 1000, 0.16]])),
+  'select-1': oneShot(botBlip([[740, 0.07], [988, 0.1]])),
+  'select-2': oneShot(botBlip([[880, 0.06], [740, 0.06], [1175, 0.11]])),
+  'select-3': oneShot(botBlip([[587, 0.08], [880, 0.12]])),
+  'select-4': oneShot(botBlip([[988, 0.06], [1175, 0.06], [1480, 0.1]])),
+  'select-5': oneShot(botBlip([[659, 0.07], [659, 0.07], [880, 0.12]])),
+  'select-6': oneShot(botBlip([[1175, 0.08], [880, 0.13]])),
   'chime-attention': oneShot(ONE_SHOTS.chime),
+  'mug-clink': oneShot(ONE_SHOTS.mugClink),
+  'chair-roll': oneShot(ONE_SHOTS.chairRoll),
+  'printer': oneShot(ONE_SHOTS.printer),
+  'distant-keys': oneShot(ONE_SHOTS.distantKeys),
 
   // Positional loops
   'work-typing': (ctx, d, o, n) => new TypingVoice(ctx, d, n, { base: 0.45 }),
-  'drone-whine': (ctx, d, o, n) => new DroneVoice(ctx, d, n, { base: 0.22 }),
+  'drone-whine': (ctx, d, o, n) => new RotorVoice(ctx, d, n, { base: 0.2 }),
 }
