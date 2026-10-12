@@ -7,6 +7,7 @@
  * in `server/harnesses/` — see the README there.
  */
 import { HARNESSES, detectedHarnesses, harnessById } from './harnesses/index.mjs'
+import { DEMO, demoThreads } from './demo.mjs'
 
 /**
  * A project's ground is keyed on its name, and a name is the last segment of its path — so two
@@ -80,6 +81,7 @@ export function disambiguateProjects(threads) {
  * broken adapter should cost you that harness's threads, not the whole atrium.
  */
 export async function scanThreads() {
+  if (DEMO) return demoThreads()
   const harnesses = await detectedHarnesses()
   const lists = await Promise.all(
     harnesses.map(async (h) => {

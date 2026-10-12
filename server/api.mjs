@@ -9,6 +9,7 @@ import { focusWindowOfPid } from './lib/windows.mjs'
 import { focusSoon } from './lib/focus.mjs'
 import { listJobs, runningJobFor, startJob } from './lib/jobs.mjs'
 import { officeSnapshot, missionAction } from './office.mjs'
+import { DEMO } from './demo.mjs'
 import {
   defaultHarness,
   harnessStatus,
@@ -497,6 +498,10 @@ export async function apiMiddleware(req, res, next) {
   }
 
   try {
+    // The demo's threads are made up: nothing behind them to open, message or start.
+    if (DEMO && req.method === 'POST' && ['/api/message', '/api/open', '/api/new-session', '/api/reveal'].includes(url.pathname)) {
+      return send(res, 403, { ok: false, error: 'This is the demo office: its bots are not real agents' })
+    }
     if (url.pathname === '/api/health' && req.method === 'GET') {
       return send(res, 200, { service: 'agent-atrium', workspace: path.resolve(here, '..') })
     }
@@ -504,7 +509,7 @@ export async function apiMiddleware(req, res, next) {
       const threads = await reconcileArchived(await scanThreads())
       // A harness that is present but cannot read its own store says so here, rather than
       // appearing healthy in the list while quietly contributing nothing.
-      const warnings = (await harnessStatus()).filter((h) => h.detected && h.error).map((h) => h.error)
+      const warnings = DEMO ? [] : (await harnessStatus()).filter((h) => h.detected && h.error).map((h) => h.error)
       return send(res, 200, { threads, scannedAt: Date.now(), warnings })
     }
 
