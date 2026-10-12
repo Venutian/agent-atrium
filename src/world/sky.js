@@ -109,7 +109,7 @@ export class Sky {
     this._envTarget?.dispose()
     this._envTarget = next
     this.scene.environment = next.texture
-    this.scene.environmentIntensity = this.settings.get('iblIntensity')
+    this._syncEnvironmentIntensity()
   }
 
   _buildDome() {
@@ -203,6 +203,7 @@ export class Sky {
     // full strength double-counts the sky and flattens everything out.
     this.hemi.intensity = light.ambient * (this.settings.get('ibl') ? 0.55 : 1)
     this.fill.intensity = light.fill
+    this.fill.color.set(light.fillColor ?? 0x8fa8d8)
     this.rim.color.set(light.rim ?? 0xffffff)
     this.rim.intensity = light.rimIntensity ?? 0
     this._placeRim()
@@ -219,6 +220,12 @@ export class Sky {
     this.scene.fog.near = style.fog.near
     this.scene.fog.far = style.fog.far
     this._envDirty = true
+    this._syncEnvironmentIntensity()
+  }
+
+  /** Keep reflected sky light below the key, without overriding the user's IBL slider. */
+  _syncEnvironmentIntensity() {
+    this.scene.environmentIntensity = this.settings.get('iblIntensity') * (this.style?.light.environment ?? 1)
   }
 
   /** Point the shadow frustum at the middle of the view. */
@@ -258,7 +265,7 @@ export class Sky {
     }
     if (changed.has('ibl') || changed.has('iblIntensity')) {
       if (this.style) this.setStyle(this.style)
-      this.scene.environmentIntensity = this.settings.get('iblIntensity')
+      this._syncEnvironmentIntensity()
       this._refreshEnvironment(true)
     }
   }

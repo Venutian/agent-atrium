@@ -8,6 +8,7 @@ import { Engine } from '../src/core/engine.js'
 import { Atrium } from '../src/game/atrium.js'
 import { suitColorFor } from '../src/agents/bots.js'
 import { Navigation } from '../src/agents/navigation.js'
+import { Sky } from '../src/world/sky.js'
 
 const room = (cells = [{ q: 1, r: 0 }], style = OFFICES.glass) => new Plot({ id: 'repo', name: 'repo', index: 0, cells, accent: 0x4f7ec9, style })
 
@@ -128,4 +129,33 @@ test('suit colors identify agent source independently of model and task status',
   assert.equal(suitColorFor({ harnessName: 'Claude Code' }), 0xe87532)
   assert.equal(suitColorFor({ id: 'codex:1' }), 0x181d24)
   for (const harness of ['cursor', 'status-files', 'kilocode', 'opencode', 'copilot']) assert.equal(suitColorFor({ harness, model: 'local' }), 0x397fcb)
+})
+
+test('style sky light follows the user slider and resets correctly when switching offices', () => {
+  const scene = new THREE.Scene()
+  const values = { ibl: true, iblIntensity: 1 }
+  const settings = { shadowSize: 1024, get: key => values[key] }
+  const sky = new Sky(scene, settings)
+  try {
+    sky.setStyle(OFFICES.glass)
+    const glassIntensity = scene.environmentIntensity
+    assert.ok(glassIntensity > 0 && glassIntensity < 1)
+    values.iblIntensity = 1.8
+    sky.onSettingsChanged(new Set(['iblIntensity']))
+    assert.equal(scene.environmentIntensity, glassIntensity * 1.8)
+    sky.setStyle(OFFICES.oak)
+    assert.equal(scene.environmentIntensity, 1.8, 'Sunset keeps its existing sky-light balance')
+    assert.equal(sky.fill.color.getHex(), 0x8fa8d8, 'a style without a fill tint resets to the original')
+    sky.setStyle(OFFICES.night)
+    assert.equal(sky.fill.color.getHex(), OFFICES.night.light.fillColor)
+    values.ibl = false
+    sky.onSettingsChanged(new Set(['ibl']))
+    assert.equal(sky.hemi.intensity, OFFICES.night.light.ambient)
+    values.ibl = true
+    sky.onSettingsChanged(new Set(['ibl']))
+    assert.equal(sky.hemi.intensity, OFFICES.night.light.ambient * 0.55)
+    assert.equal(scene.environmentIntensity, values.iblIntensity * OFFICES.night.light.environment)
+  } finally {
+    sky.dispose()
+  }
 })
