@@ -106,7 +106,8 @@ test('codex with no CLI installed offers the deep link alone', posixOnly, async 
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agent-atrium-nocli-'))
   try {
     const opened = await withEnv({ PATH: dir }, () => codex.openThread({ sessionId: SESSION_ID }))
-    assert.deepEqual(opened, { ok: true, url: `codex://threads/${SESSION_ID}`, command: undefined })
+    // No resume command, and the desktop app's window to bring forward once the link opens it.
+    assert.deepEqual(opened, { ok: true, url: `codex://threads/${SESSION_ID}`, command: undefined, window: { names: ['ChatGPT', 'Codex', 'codex'], title: '' } })
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }

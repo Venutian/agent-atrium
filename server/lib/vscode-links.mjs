@@ -10,7 +10,9 @@ export const plainPath = (p) => (typeof p === 'string' ? p.replace(/^\\\\\?\\(?!
 
 export function vscodeFolderUrl(cwd, scheme = 'vscode') {
   cwd = plainPath(cwd)
-  if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || !['vscode', 'vscode-insiders'].includes(scheme)) return ''
+  // A drive path is absolute wherever this runs; POSIX `path.isAbsolute` alone says otherwise.
+  const absolute = typeof cwd === 'string' && (path.isAbsolute(cwd) || /^[a-z]:[\\/]/i.test(cwd))
+  if (!absolute || !['vscode', 'vscode-insiders'].includes(scheme)) return ''
   const normalized = cwd.replace(/\\/g, '/').replace(/^\/+/, '')
   // Each segment is encoded, but a drive's colon stays a colon: `vscode://file/c:/work`.
   const encoded = normalized.split('/').map((part, i) => (i === 0 && /^[a-z]:$/i.test(part) ? part : encodeURIComponent(part)))
