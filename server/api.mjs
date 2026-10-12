@@ -482,6 +482,10 @@ function readJsonBody(req, limit = 4 * 1024 * 1024) {
   })
 }
 
+/** The request came over loopback — from this computer, not another device on the network. */
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+const fromThisMachine = (req) => LOOPBACK.has(req.socket?.remoteAddress)
+
 /** Connect-style middleware: handles /api/*, passes everything else through. */
 export async function apiMiddleware(req, res, next) {
   const url = new URL(req.url, 'http://localhost')
@@ -537,6 +541,11 @@ export async function apiMiddleware(req, res, next) {
 
     if (url.pathname === '/api/message' && req.method === 'POST') {
       const body = await readJsonBody(req)
+      // Telling an agent what to do is for the person at this machine. With the server opened
+      // to the network (AGENT_ATRIUM_HOST), another device may watch the office but not steer it.
+      if (body?.plan !== true && !fromThisMachine(req)) {
+        return send(res, 403, { ok: false, error: 'Messages can only be sent from the computer Agent Atrium runs on' })
+      }
       return send(res, ...(await sendMessage(body)))
     }
 

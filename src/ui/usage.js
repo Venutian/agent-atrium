@@ -14,7 +14,8 @@ export function usageStats(threads) {
     return map.get(id)
   }
   for (const thread of threads) {
-    if (seen.has(thread.id)) continue
+    // An errand is part of its parent's session, not a session of its own.
+    if (seen.has(thread.id) || thread.parentId) continue
     seen.add(thread.id)
     report.sessions++
     const u = thread.usage
