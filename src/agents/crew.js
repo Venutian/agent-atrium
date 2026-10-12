@@ -1,14 +1,15 @@
 import * as THREE from 'three'
 import { withCurve } from '../core/curve.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
+import { bodyGeometry } from './body.js'
 
 /**
  * Real skeletal animation for the whole crew, in one draw call.
  *
- * The body is KayKit's Mannequin_Medium and the motion is KayKit's Character Animations
- * (both CC0) — hand-authored walk cycles, hammering, sitting, cheering. What they are not
- * is instanceable: three skins a `SkinnedMesh` from a `Skeleton` object, one skeleton per
+ * The skeleton and the motion are KayKit's Character Animations (CC0): hand-authored walk
+ * cycles, hammering, sitting, cheering. The body on that skeleton is the atrium's own (see
+ * `body.js`); the pack's mannequin mesh is only read for its skin. What clips are not is
+ * instanceable: three skins a `SkinnedMesh` from a `Skeleton` object, one skeleton per
  * character, which for three hundred threads means three hundred draw calls and three
  * hundred skeletons stepped on the CPU every frame.
  *
@@ -161,12 +162,6 @@ function tweakClip(clip, table, key) {
 
 const CREW_URL = `${import.meta.env?.BASE_URL ?? '/'}assets/crew.glb`
 
-/**
- * The mannequin's own head is left out of the body: the atrium puts its own helmet, visor
- * and screen-face on the head bone instead, which is the whole of the bot's identity.
- */
-const DROP_MESHES = ['Mannequin_Medium_Head']
-
 let loading = null
 let rig = null
 let gltfCache = null
@@ -182,7 +177,7 @@ export function loadCrew() {
  * new rig with `setRig`, and nothing else has to know.
  */
 export async function rebakeCrew(tweaks = TWEAKS) {
-  rig = await bake(DROP_MESHES, tweaks)
+  rig = await bake(tweaks)
   return rig
 }
 if (import.meta.env?.DEV && typeof window !== 'undefined') window.__rebakeCrew = rebakeCrew
@@ -192,7 +187,7 @@ export function crewRig() {
   return rig
 }
 
-async function bake(dropMeshes = DROP_MESHES, tweaks = TWEAKS) {
+async function bake(tweaks = TWEAKS) {
   const gltf = gltfCache || (gltfCache = await new GLTFLoader().loadAsync(CREW_URL))
   const root = gltf.scene
   root.updateMatrixWorld(true)
@@ -207,51 +202,22 @@ async function bake(dropMeshes = DROP_MESHES, tweaks = TWEAKS) {
   const bones = skeleton.bones
   const boneIndex = new Map(bones.map((b, i) => [b.name, i]))
 
-  const geometry = mergeBody(skinned, dropMeshes)
+  const geometry = bodyGeometry(bindJoints(skeleton, skinned[0]), boneIndex)
   const bake = bakeClips(root, skeleton, skinned[0], gltf.animations, tweaks)
 
   return { geometry, bones, boneIndex, ...bake }
 }
 
 /**
- * Merge the mannequin's six parts into one geometry.
- *
- * They already share a skin, so the joint indices line up and no remapping is needed. The
- * UVs go: the pack's texture is a name badge and a smiley, and the atrium paints its crew
- * from its own suit palette instead.
+ * Where each bone sits in the bind pose, in the skinned mesh's own space: the space the
+ * body is built in, and the space the baked skinning matrices map from.
  */
-function mergeBody(skinned, dropMeshes) {
-  const drop = new Set(dropMeshes)
-  const parts = []
-
-  for (const mesh of skinned) {
-    if (drop.has(mesh.name)) continue
-    const geo = new THREE.BufferGeometry()
-    const src = mesh.geometry
-    const count = src.attributes.position.count
-
-    for (const [name, size] of [
-      ['position', 3],
-      ['normal', 3],
-      ['skinIndex', 4],
-      ['skinWeight', 4],
-    ]) {
-      const a = src.getAttribute(name)
-      if (!a) throw new Error(`crew: ${mesh.name} has no ${name}`)
-      const data = new Float32Array(count * size)
-      for (let i = 0; i < count; i++) {
-        for (let k = 0; k < size; k++) data[i * size + k] = a.getComponent(i, k)
-      }
-      geo.setAttribute(name, new THREE.BufferAttribute(data, size))
-    }
-    if (src.index) geo.setIndex(Array.from(src.index.array))
-    parts.push(geo)
-  }
-
-  const merged = parts.length === 1 ? parts[0] : BufferGeometryUtils.mergeGeometries(parts, false)
-  if (merged !== parts[0]) parts.forEach((g) => g.dispose())
-  merged.computeBoundingBox()
-  return merged
+function bindJoints(skeleton, mesh) {
+  const m = new THREE.Matrix4()
+  return new Map(skeleton.bones.map((bone, i) => [
+    bone.name,
+    new THREE.Vector3().setFromMatrixPosition(m.copy(skeleton.boneInverses[i]).invert().premultiply(mesh.bindMatrixInverse)),
+  ]))
 }
 
 /**
