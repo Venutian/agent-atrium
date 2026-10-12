@@ -12,9 +12,9 @@ import { headGeometry, glassGeometry, screenGeometry, haloGeometry, earLightGeom
 /**
  * Every bot in the atrium, batched into a fixed set of instanced draw calls.
  *
- * The body is one instanced, GPU-skinned mesh playing KayKit's hand-animated clips (see
- * `crew.js`) — every torso, arm and leg in the atrium in a single draw, whether there are
- * six threads or three hundred. Everything the crew *wears* stays procedural and stays in
+ * The body (see `body.js`) is one instanced, GPU-skinned mesh playing KayKit's hand-animated
+ * clips (see `crew.js`) — every torso, arm and leg in the atrium in a single draw, whether
+ * there are six threads or three hundred. Everything the crew *wears* stays procedural and stays in
  * its own `InstancedMesh`: head, glass, LED face, backpack, halo, ear lights and chest lamp, because
  * those carry the atrium's own identity and its own shaders.
  *
@@ -102,7 +102,7 @@ const ARRIVE_RADIUS = SEPARATION + 0.45
 const PATH_BUDGET = 6
 
 /**
- * The mannequin is authored 2.2 units tall. The atrium wants a "little guy" silhouette at
+ * The rig is authored 2.2 units tall. The atrium wants a "little guy" silhouette at
  * the isometric rest distance, and the buildings are sized against one — so the whole rig
  * is scaled once, here, and every worn part below is measured in the *scaled* character's
  * own units so the helmet does not have to be re-tuned when this moves.
@@ -255,7 +255,8 @@ export class Bots {
     }
 
     const material = decorateSkinned(
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.68, metalness: 0.04 }),
+      // The body paints its own joints and gear dark; the suit tint multiplies over the shell.
+      new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.05, envMapIntensity: 0.85 }),
       this.crewUniforms
     )
 
