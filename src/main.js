@@ -938,6 +938,7 @@ window.addEventListener('keydown', (e) => {
           drag.swallowClick = true
         }
       } else if (document.querySelector('.help.open')) hud.toggleHelp(false)
+      else if (document.querySelector('.usage-dashboard.open')) hud.toggleUsage(false)
       else if (selectedId) select(null, {})
       else if (selectedProject) actions.closeProject()
       break
@@ -989,6 +990,7 @@ function applyThreads(list) {
 
   const stats = atrium.setThreads(list, archivedSet, hiddenSet, known)
   hud.setStats(stats)
+  hud.setUsage(list)
   frameOffice()
   const folded = atrium.dormantProjects || new Set()
   const onFloor = [...atrium.threads.values()].filter((t) => !archivedSet.has(t.id) && !hiddenSet.has(t.project) && !folded.has(t.project))

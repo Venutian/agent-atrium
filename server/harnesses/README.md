@@ -115,6 +115,7 @@ what earns a repo its own zone, and `lastActivityAt` is what sorts the whole map
 | `cwd` | string | Where the thread is actually working |
 | `gitBranch` | string | Branch name, or `''` |
 | `model` / `effort` | string | Shown on the thread card |
+| `usage` | object or null | Optional recorded counts: `known`, `inputTokens` (includes cache), `outputTokens`, `totalTokens`, `cachedInputTokens`, `cacheWriteTokens`, `reasoningTokens`, `byModel`, `observedAt`, `coverage`. Only reported values; never estimate from transcript bytes. `coverage: 'partial'` marks incomplete totals. Optional `context` and `limits` carry timestamped provider snapshots; context capacity is separate from subscription allowance |
 | `createdAt` | number | Epoch ms |
 | `lastActivityAt` | number | Epoch ms. Sorts the atrium and drives the "asleep for 3 days" behaviour |
 | `lastFocusedAt` | number | Epoch ms, `0` if unknowable |

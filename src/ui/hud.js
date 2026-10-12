@@ -3,6 +3,7 @@ import { OFFICES, OFFICE_ORDER } from '../world/offices.js'
 import { STATUS_LABEL } from '../game/atrium.js'
 import { FACE, FRAME_COLS, FRAME_ROWS } from '../agents/faces.js'
 import { PLOT_PALETTE, hashString } from '../world/plots.js'
+import { usageStats, formatTokens, exactTokens, allowanceWindow, contextRemaining } from './usage.js'
 
 /**
  * The whole HUD, in plain DOM.
@@ -373,6 +374,24 @@ export class Hud {
     const on = (sel, ev, fn) => this.$(sel).addEventListener(ev, fn)
 
     on('#btn-settings', 'click', () => this.toggleSettings())
+    on('#btn-usage', 'click', () => this.toggleUsage())
+    on('#btn-close-usage', 'click', () => this.toggleUsage(false))
+    on('.usage-dashboard', 'click', e => {
+      if (e.target === this.$('.usage-dashboard')) this.toggleUsage(false)
+    })
+    for (const button of this.el.querySelectorAll('[data-usage-tab]')) button.addEventListener('click', () => {
+      this.usageTab = button.dataset.usageTab
+      this._renderUsage()
+    })
+    on('.usage-dashboard', 'keydown', e => {
+      e.stopPropagation()
+      if (e.key === 'Escape') { e.preventDefault(); this.toggleUsage(false); return }
+      if (e.key !== 'Tab') return
+      const buttons = [...this.$('.usage-dashboard').querySelectorAll('button')]
+      const first = buttons[0], last = buttons.at(-1)
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    })
     // On a phone the sidebar is a sheet: a tap on its brand row (not on its buttons) pulls
     // it up or lets it drop, and a drag on the row does the same by direction.
     const brandbar = this.$('.side .brandbar')
@@ -481,6 +500,52 @@ export class Hud {
       el.querySelector('.n').textContent = String(n)
       el.dataset.empty = String(n === 0)
     }
+  }
+
+  setUsage(threads) {
+    this.usage = usageStats(threads)
+    this.$('#btn-usage .usage-total').textContent = this.usage.measured ? `${formatTokens(this.usage.totalTokens)} tokens` : 'View usage'
+    if (this.$('.usage-dashboard').classList.contains('open')) this._renderUsage()
+  }
+
+  _renderUsage() {
+    const report = this.usage || usageStats([])
+    const tab = this.usageTab || 'assistants'
+    for (const button of this.el.querySelectorAll('[data-usage-tab]')) button.setAttribute('aria-pressed', String(button.dataset.usageTab === tab))
+    this.$('.usage-summary').innerHTML = [
+      ['Tokens recorded', report.measured ? formatTokens(report.totalTokens) : 'Unknown'],
+      ['Input · includes cache', report.measured ? formatTokens(report.inputTokens) : 'Unknown'],
+      ['Output', report.measured ? formatTokens(report.outputTokens) : 'Unknown'],
+      ['Sessions with usage', `${report.measured} / ${report.sessions}`],
+    ].map(([label, value]) => `<div><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join('')
+    this.$('.usage-coverage').textContent = `Scanned local sessions, including hidden and archived rooms. ${report.partial ? `${report.partial} session(s) have partial usage. ` : ''}Subagent logs and cloud-only work are excluded; this is not an account bill.`
+    const time = at => at ? new Date(at).toLocaleString() : 'Unknown'
+    const windowName = minutes => minutes >= 1440 ? `${Math.round(minutes / 1440)}-day window` : `${minutes / 60}-hour window`
+    this.$('.usage-allowances').innerHTML = report.assistants.map(assistant => {
+      const limits = report.limits.filter(limit => limit.assistant === assistant.label)
+      const windows = limits.flatMap(limit => limit.windows.map(window => {
+        const status = allowanceWindow(window, limit.observedAt)
+        const remaining = status.remainingPercent === null ? 'Awaiting new report' : `${Math.round(status.remainingPercent)}% left${status.stale ? ' · older snapshot' : ' · last reported'}`
+        return `<div class="allowance-window"><div><span>${escapeHtml(limit.name || limit.id)} · ${escapeHtml(windowName(window.windowMinutes))}</span><strong>${remaining}</strong></div>
+          ${status.expired ? '' : `<meter min="0" max="100" value="${status.remainingPercent}" aria-label="Last reported allowance remaining"></meter>`}
+          <small>Reset: ${escapeHtml(time(window.resetsAt))} · Reported: ${escapeHtml(time(limit.observedAt))}</small></div>`
+      }))
+      const providerUrl = assistant.id === 'codex' ? 'https://chatgpt.com/codex/settings/usage' : assistant.id === 'claude-code' ? 'https://claude.ai/settings/usage' : ''
+      return `<article><h4>${escapeHtml(assistant.label)}</h4>${windows.length ? windows.join('') : '<p>Remaining allowance unavailable in local records.</p>'}${providerUrl ? `<a href="${providerUrl}" target="_blank" rel="noopener noreferrer">View provider usage ↗</a>` : ''}</article>`
+    }).join('') || '<p>No assistants detected yet.</p>'
+    this.$('.usage-table-wrap').innerHTML = `<table><thead><tr><th>${tab === 'repos' ? 'Repository' : tab === 'models' ? 'Model' : 'Assistant'}</th><th>Input</th><th>Cached input</th><th>Output</th><th>Total</th></tr></thead><tbody>${report[tab].map(row =>
+      `<tr><th scope="row">${escapeHtml(row.label)}${row.assistant ? `<small>${escapeHtml(row.assistant)}</small>` : `<small>${row.measured} / ${row.sessions} sessions reporting</small>`}</th>${['inputTokens', 'cachedInputTokens', 'outputTokens', 'totalTokens'].map(key => `<td title="${row.measured ? exactTokens(row[key]) : 'Usage unavailable'}">${row.measured ? formatTokens(row[key]) : 'Unknown'}</td>`).join('')}</tr>`
+    ).join('') || '<tr><td colspan="5">No recorded usage for this view yet.</td></tr>'}</tbody></table>`
+  }
+
+  toggleUsage(force) {
+    const panel = this.$('.usage-dashboard')
+    const open = force ?? !panel.classList.contains('open')
+    panel.classList.toggle('open', open)
+    panel.inert = !open
+    this.$('#btn-usage').setAttribute('aria-expanded', String(open))
+    if (open) { this._renderUsage(); this.$('#btn-close-usage').focus({ preventScroll: true }) }
+    else if (panel.contains(document.activeElement)) this.$('#btn-usage').focus({ preventScroll: true })
   }
 
   /**
@@ -698,6 +763,15 @@ export class Hud {
     if (thread.gitBranch) facts.push(['Branch', thread.gitBranch])
     if (thread.worktree) facts.push(['Worktree', thread.worktree])
     if (thread.model) facts.push(['Model', shortModel(thread.model)])
+    if (thread.usage?.known) {
+      const u = thread.usage
+      facts.push(['Tokens recorded', `${formatTokens(u.totalTokens)}${u.coverage === 'partial' ? ' · partial' : ''}`])
+      facts.push(['Input / output', `${formatTokens(u.inputTokens)} / ${formatTokens(u.outputTokens)}`])
+      if (u.cachedInputTokens) facts.push(['Cached input', formatTokens(u.cachedInputTokens)])
+    } else facts.push(['Token usage', 'Unavailable in local records'])
+    const context = contextRemaining(thread.usage?.context)
+    if (context) facts.push(['Context headroom', `${thread.usage.context.basis === 'last-call' ? '~' : ''}${formatTokens(context.remaining)} · last report`])
+    if (thread.usage?.copilotCredits != null) facts.push(['Copilot credits used', String(thread.usage.copilotCredits)])
     this.$('.thread-pop .meta').innerHTML = facts
       .map(([k, v]) => `<div class="fact"><span class="k">${k}</span><span class="v">${escapeHtml(v)}</span></div>`)
       .join('')
@@ -1056,6 +1130,7 @@ export class Hud {
     this.actions.uiVisibility?.(this.visible)
     this._syncLayout()
     if (!this.visible) this.toggleHelp(false)
+    if (!this.visible) this.toggleUsage(false)
     return this.visible
   }
 
@@ -1173,6 +1248,7 @@ const TEMPLATE = `
   </header>
 
   <div class="stats"></div>
+  <button class="btn ghost usage-launch" id="btn-usage" aria-expanded="false"><span>Office stats</span><span class="usage-total">View usage</span></button>
 
   <div class="side-body">
     <div class="projects-pane">
@@ -1223,6 +1299,22 @@ const TEMPLATE = `
 <div class="settings panel closed" inert>
   <header>Settings <button class="btn icon ghost" id="btn-close-settings" title="Close">${ICON.close}</button></header>
   <div class="body"></div>
+</div>
+
+<div class="usage-dashboard" inert>
+  <section class="panel usage-sheet" role="dialog" aria-modal="true" aria-labelledby="usage-title">
+    <header><div><h2 id="usage-title">Office stats</h2><p>Tokens, models and remaining allowances</p></div><button class="btn icon ghost" id="btn-close-usage" aria-label="Close office stats">${ICON.close}</button></header>
+    <div class="usage-body">
+      <div class="usage-summary"></div>
+      <p class="usage-coverage"></p>
+      <h3>Assistant allowances</h3>
+      <p class="usage-note">Provider limits may be shared across models. These are local snapshots, not live account balances. An expired window needs a new report.</p>
+      <div class="usage-allowances"></div>
+      <div class="usage-tabs" aria-label="Usage breakdown"><button class="btn" data-usage-tab="assistants" aria-pressed="true">Assistants</button><button class="btn" data-usage-tab="models" aria-pressed="false">Models</button><button class="btn" data-usage-tab="repos" aria-pressed="false">Repositories</button></div>
+      <div class="usage-table-wrap"></div>
+      <p class="usage-note">Cache and reasoning tokens are already included in input or output totals. Context headroom on a bot is separate from your subscription allowance.</p>
+    </div>
+  </section>
 </div>
 
 <div class="thread-pop panel badge">

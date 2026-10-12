@@ -8,6 +8,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { exists, listDirs, listFiles } from '../lib/fsutil.mjs'
 import { editorWindow, sessionIdValid, vscodeFolderUrl, vscodeSessionUrl } from '../lib/vscode-links.mjs'
+import { vscodeUsage } from '../lib/usage.mjs'
 
 const MAX_BYTES = 32 * 1024 * 1024
 const cache = new Map()
@@ -96,7 +97,7 @@ async function readSession(file, stat) {
     const data = { sessionId: raw.sessionId, creationDate: raw.creationDate, customTitle: raw.customTitle,
       computedTitle: raw.computedTitle, title: raw.title, workingDirectory: raw.workingDirectory,
       isSubagent: raw.isSubagent, parentSessionId: raw.parentSessionId, isArchived: raw.isArchived,
-      repoData: { branchName: raw.repoData?.branchName },
+      repoData: { branchName: raw.repoData?.branchName }, usage: vscodeUsage(requests),
       inputState: { selectedModel: { metadata: { name: raw.inputState?.selectedModel?.metadata?.name }, identifier: raw.inputState?.selectedModel?.identifier } },
       requests: first ? [request(first), request(requests.at(-1))] : [] }
     cache.set(file, { mtime: stat.mtimeMs, size: stat.size, data })
@@ -179,6 +180,7 @@ async function scanThreads() {
         ...projects.get(cwd), cwd, worktree: '', gitBranch: data.repoData?.branchName || '',
         model: clean(last.modelId || data.inputState?.selectedModel?.metadata?.name || data.inputState?.selectedModel?.identifier),
         effort: '', createdAt: Number(data.creationDate) || stat.birthtimeMs, lastActivityAt: activity,
+        usage: data.usage,
         lastFocusedAt: 0, unread, running, hasError, archived: Boolean(data.isArchived),
         starred: false, routine: '', prState: '', sizeBytes: stat.size, source: 'vscode',
         canOpen: Boolean(vscodeSessionUrl(openPath, id, store.scheme)),
