@@ -54,13 +54,35 @@ a rim light in a second colour that outlines the bots, and a touch of depth of f
 
 | Style | Look |
 | --- | --- |
-| **Glass Studio** (default) | Soft periwinkle light, a bevelled hex floor and clear glass rooms |
-| **Daylight Office** | A real office in warm beige: carpet tiles, oak desks, white frames and soft daylight |
+| **Glass Studio** (default) | Pearl-white glass rooms, cool reflections and long afternoon shadows |
+| **Daylight Office** | Late-afternoon daylight on carpet and oak, soft blue shade behind white frames |
 | **Sunset Loft** | Amber evening light across dark timber floors, an orange sky behind |
-| **Greenhouse** | Natural stone, black steel frames, plants everywhere and sunlight through glass |
-| **Neon Night** | Deep blue after hours: a glossy hex floor, soft neon room edges and a violet rim |
+| **Greenhouse** | Low sunlight through steel and glass, warm stone and deep leafy shadows |
+| **Neon Night** | Low moonlight, silver-blue highlights and violet edges across a dark tiled floor |
 
 Every style is the same office. Your rooms, bots and layout stay put when you switch.
+
+## Office stats
+
+Click **Office stats** below the status counters for recorded tokens by assistant, model and
+repository. Bot badges also show input/output, cached input and context headroom when reported.
+The view includes scanned hidden and archived sessions; it excludes helper/subagent logs and
+cloud-only work. Totals are local session records, not a billing statement. Forked sessions may
+repeat inherited history, and providers may omit some usage.
+
+- **Claude Code:** assistant-message usage, deduplicated by message ID; input includes cache
+  reads and writes. The local logs do not expose a dependable remaining subscription allowance.
+- **Codex:** cumulative token snapshots, model changes and last-call context capacity; remaining
+  allowance windows and reset times are shown when recorded. These limits may be shared across
+  models. Old reports are marked, and expired windows stay unknown until a new report arrives.
+- **VS Code Chat:** provider-reported whole-turn model totals where available. Older records
+  contain latest-call input and accumulated output, which are labelled partial. Missing usage,
+  including local models that do not report it, stays unknown. Copilot credits used are shown
+  on a badge when recorded; they are not a remaining account balance.
+
+Usage is read locally without making provider requests or reading authentication credentials.
+Unchanged logs are cached; appended records are read incrementally. Provider-usage links let
+you check the authoritative account view yourself.
 
 ## Reading the office
 

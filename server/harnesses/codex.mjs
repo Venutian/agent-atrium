@@ -25,6 +25,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { exists, findExecutable, jsonLines, listDirs, listFiles, num, readHead, readTail } from '../lib/fsutil.mjs'
+import { readRecordedUsage } from '../lib/usage.mjs'
 import { editorWindow, plainPath, vscodeExtensionUrl, vscodeFolderUrl } from '../lib/vscode-links.mjs'
 
 /** The Codex desktop app ships as `ChatGPT.exe` on Windows. */
@@ -319,6 +320,7 @@ async function scanThreads() {
       gitBranch: row?.git_branch || meta.gitBranch || '',
       model: row?.model || meta.model || '',
       effort: row?.reasoning_effort || meta.effort || '',
+      usage: entry ? await readRecordedUsage(entry.file, 'codex') : null,
       createdAt: num(row?.created_at_ms) || meta.createdAt || entry?.mtime || 0,
       lastActivityAt,
       // Codex records no focus history, so "have you looked at this" is unknowable — not false.

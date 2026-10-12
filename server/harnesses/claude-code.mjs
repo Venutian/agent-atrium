@@ -20,6 +20,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { exists, findExecutable, jsonLines, listDirs, listFiles, num, readHead, readTail } from '../lib/fsutil.mjs'
 import { editorWindow, vscodeExtensionUrl, vscodeFolderUrl } from '../lib/vscode-links.mjs'
+import { readRecordedUsage } from '../lib/usage.mjs'
 
 /** The Claude desktop app's window: `claude` on Windows, `Claude` as an X11 class. */
 const DESKTOP_WINDOW = { names: ['claude', 'Claude'], title: '' }
@@ -612,6 +613,7 @@ async function scanThreads() {
   // Unread = the thread moved on after you last looked at it; never opened counts as unread.
   // Terminal-only threads have no focus history at all, so "unread" is unknowable — not true.
   for (const thread of threads) {
+    thread.usage = await readRecordedUsage(thread.transcriptFile, 'claude')
     const seenAt = thread.recordActivityAt ?? thread.lastActivityAt
     thread.unread = thread.desktopSessionIds.length > 0 && seenAt > thread.lastFocusedAt
     const fresh = now - thread.lastActivityAt < ACTIVE_WINDOW_MS
