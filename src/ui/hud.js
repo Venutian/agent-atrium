@@ -392,7 +392,8 @@ export class Hud {
     const on = (sel, ev, fn) => this.$(sel).addEventListener(ev, fn)
 
     on('#btn-settings', 'click', () => this.toggleSettings())
-    on('#btn-usage', 'click', () => this.toggleUsage())
+    // Atlas's HQ is a place: the button goes there, and its screens open the details.
+    on('#btn-usage', 'click', () => (this.actions.visitHq ? this.actions.visitHq() : this.toggleUsage()))
     on('#btn-close-usage', 'click', () => this.toggleUsage(false))
     on('.usage-dashboard', 'click', e => {
       if (e.target === this.$('.usage-dashboard')) this.toggleUsage(false)

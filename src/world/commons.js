@@ -1,11 +1,13 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { withCurve } from '../core/curve.js'
+import { createHeadquarters } from './hq.js'
 
 /**
  * The commons: the reception cell's floor, around the arrival steps, furnished as the office's
  * shared space — a lounge, a coffee bar, a water cooler, a ping-pong table, an arcade cabinet,
- * bean bags, and a big status board that shows the whole office at a glance.
+ * bean bags, a big status board that shows the whole office at a glance, and Director Atlas's
+ * HQ (see `hq.js`).
  *
  * Local coordinates, centred on the reception cell. New bots come down the steps and leave
  * toward +X, so that side is kept clear as a walkway. The default camera looks in from +X/+Z,
@@ -117,7 +119,7 @@ function statusBoard(style) {
     })
     c.fillStyle = '#9fb4bd'
     c.font = '600 24px "Barlow Semi Condensed", ui-sans-serif, system-ui, sans-serif'
-    c.fillText('CLICK THE BOARD OR ATLAS TO ENTER THE DIRECTOR’S ROOM', 52, 478)
+    c.fillText('THE FULL STORY IS IN ATLAS’S HQ, NEXT DOOR', 52, 478)
     texture.needsUpdate = true
   }
   draw()
@@ -139,7 +141,7 @@ export function createCommons(style) {
   const block = (x, z, r) => obstacles.push({ x, z, r })
 
   // Lounge, at the back: a rug, an L of sofas round a low table, and a floor lamp.
-  p.piece(-4.6, -0.6, 0, () => {
+  p.piece(-3.8, 3.2, 0, () => {
     p.cyl(1.75, 0.02, f.rug, 0, 0.01, 0, 32)
     for (const [x, z, ry] of [[-1.35, 0, Math.PI / 2], [0, -1.35, 0]]) {
       p.box(2.2, 0.38, 0.8, f.sofa, x, 0.19, z, ry)
@@ -152,7 +154,7 @@ export function createCommons(style) {
     p.cyl(0.05, 1.7, 0x2e333b, -1.3, 0.85, -1.3, 8)
     p.cyl(0.24, 0.3, 0xfff1cc, -1.3, 1.75, -1.3, 14, { glow: true })
   })
-  block(-4.6, -0.6, 1.9)
+  block(-3.8, 3.2, 1.9)
 
   // Coffee bar: a counter, an espresso machine with a warm glow, a stack of cups.
   p.piece(-1.2, -5.4, Math.PI / 6, () => {
@@ -182,13 +184,13 @@ export function createCommons(style) {
   block(0.6, 5.0, 1.5)
 
   // Arcade cabinet, its screen in the style's accent.
-  p.piece(-2.8, 5.2, Math.PI * 0.25, () => {
+  p.piece(-1.9, 6.7, Math.PI * 0.15, () => {
     p.box(0.7, 1.75, 0.65, 0x23262d, 0, 0.875, 0)
     p.box(0.52, 0.42, 0.04, f.glow, 0, 1.35, 0.33, 0, { glow: true })
     p.box(0.6, 0.1, 0.3, 0x3a3f48, 0, 1.0, 0.42)
     p.box(0.7, 0.12, 0.66, f.glow, 0, 1.81, 0, 0, { glow: true })
   })
-  block(-2.8, 5.2, 0.6)
+  block(-1.9, 6.7, 0.6)
 
   // Bean bags round the ping-pong table.
   for (const [x, z, color] of [[3.3, 3.9, f.sofa], [3.9, 5.2, f.glow]]) {
@@ -211,7 +213,7 @@ export function createCommons(style) {
 
   // The status board, on two legs at the back, angled toward the camera's usual seat.
   const board = statusBoard(style)
-  const boardAt = { x: -6.6, z: 2.6, ry: Math.PI * 0.62 }
+  const boardAt = { x: -7.6, z: 3.6, ry: Math.PI * 0.62 }
   const stand = new Parts()
   stand.piece(boardAt.x, boardAt.z, boardAt.ry, () => {
     for (const s of [-1, 1]) stand.box(0.1, 2.4, 0.1, 0x3a3f48, s * 1.7, 1.2, -0.08)
@@ -226,94 +228,29 @@ export function createCommons(style) {
   }
   block(boardAt.x, boardAt.z, 0.6)
 
-  // Atlas has a real glass hex office and a seated silhouette, outside the arrival lane.
-  const director = new THREE.Group()
-  director.name = 'director-atlas'
-  director.position.set(-7.8, 0, -3.4)
-  const boss = new Parts()
-  boss.cyl(2.35, 0.07, style.room.base, 0, 0.04, 0, 6)
-  boss.box(1.9, 0.08, 0.9, f.wood, 0, 0.92, 0.55)
-  for (const x of [-0.75, 0.75]) boss.box(0.07, 0.86, 0.7, style.frame.post, x, 0.46, 0.55)
-  boss.box(0.85, 0.12, 0.65, 0x263944, 0, 0.56, -0.4)
-  boss.box(0.85, 0.9, 0.12, 0x263944, 0, 0.95, -0.68)
-  boss.cyl(0.08, 0.4, 0x263944, 0, 0.23, -0.4, 8)
-  boss.box(0.53, 0.47, 0.3, 0x28546b, 0, 0.88, -0.3)
-  boss.box(0.09, 0.31, 0.035, 0xffcc65, 0, 0.92, -0.13)
-  for (const x of [-0.2, 0.2]) { boss.box(0.17, 0.25, 0.22, 0x28546b, x, 0.5, 0.03); boss.box(0.2, 0.12, 0.36, 0x182d38, x, 0.32, 0.15) }
-  for (const x of [-0.4, 0.4]) boss.box(0.18, 0.15, 0.55, 0x28546b, x, 0.92, 0.08)
-  boss.box(0.52, 0.03, 0.18, 0x182d38, 0, 0.99, 0.62)
-  boss.cyl(0.09, 0.13, 0xf4eee2, 0.68, 1.02, 0.65, 12)
-  const bossMesh = boss.mesh(boss.solid, curved(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5 })))
-  director.add(bossMesh)
-  const headParts = new Parts()
-  headParts.box(0.75, 0.55, 0.4, 0x263944, 0, 0, 0)
-  headParts.box(0.62, 0.42, 0.03, 0x091b24, 0, 0, 0.22)
-  headParts.box(0.07, 0.1, 0.04, 0x81edc4, -0.14, 0.045, 0.245)
-  headParts.box(0.07, 0.1, 0.04, 0x81edc4, 0.14, 0.045, 0.245)
-  headParts.box(0.17, 0.025, 0.04, 0x81edc4, 0, -0.1, 0.245)
-  headParts.cyl(0.045, 0.16, 0xffcc65, 0, 0.35, 0, 8)
-  const head = headParts.mesh(headParts.solid, curved(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4 })))
-  head.position.set(0, 1.38, -0.28)
-  director.add(head)
-  const shell = new Parts()
-  const panes = []
-  for (let i = 0; i < 6; i++) {
-    const a = i * Math.PI / 3, b = (i + 1) * Math.PI / 3
-    const x = Math.cos(a) * 2.35, z = Math.sin(a) * 2.35
-    shell.box(0.08, 2.2, 0.08, style.frame.post, x, 1.16, z)
-    if (i === 0) continue // the portal faces the open floor
-    const mx = (x + Math.cos(b) * 2.35) / 2, mz = (z + Math.sin(b) * 2.35) / 2
-    const ry = -Math.atan2(Math.sin(b) - Math.sin(a), Math.cos(b) - Math.cos(a))
-    const height = mz > 0 ? 1.2 : 2.1
-    shell.box(2.35, 0.07, 0.07, style.frame.top, mx, height + 0.08, mz, ry)
-    const pane = new THREE.BoxGeometry(2.28, height, 0.03)
-    pane.rotateY(ry); pane.translate(mx, height / 2 + 0.08, mz); panes.push(pane)
-  }
-  director.add(shell.mesh(shell.solid, curved(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }))))
-  const glassGeo = mergeGeometries(panes); panes.forEach(p => p.dispose())
-  director.add(new THREE.Mesh(glassGeo, curved(new THREE.MeshStandardMaterial({ color: style.glass.color,
-    opacity: style.glass.opacity, transparent: true, depthWrite: false, roughness: 0.2, side: THREE.DoubleSide }))))
-  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), curved(new THREE.MeshBasicMaterial({ color: 0x81edc4 })))
-  beacon.position.set(0, 1.85, -0.28); director.add(beacon)
-  if (typeof document !== 'undefined') {
-    const plate = document.createElement('canvas'); plate.width = 768; plate.height = 160
-    const context = plate.getContext('2d')
-    context.fillStyle = style.sign.plate; context.fillRect(0, 0, 768, 160)
-    context.textAlign = 'center'; context.fillStyle = style.sign.text
-    context.font = '700 56px "Barlow Semi Condensed", sans-serif'; context.fillText('ATLAS · DIRECTOR', 384, 72)
-    context.font = '500 30px "Barlow Semi Condensed", sans-serif'; context.fillText('CLICK TO VISIT HQ', 384, 122)
-    const texture = new THREE.CanvasTexture(plate); texture.colorSpace = THREE.SRGBColorSpace
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.7), curved(new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, toneMapped: false })))
-    sign.position.set(0, 2.65, 0.4); director.add(sign)
-  }
-  group.add(director)
-  const missionStack = []
-  for (let i = 0; i < 5; i++) {
-    const envelope = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.045, 0.24), curved(new THREE.MeshStandardMaterial({ color: i % 2 ? 0xd5eaf9 : 0xfff2d6, roughness: 0.65 })))
-    envelope.position.set(-0.62 + (i % 2) * 0.025, 0.995 + i * 0.05, 0.55); envelope.rotation.y = i * 0.08; envelope.visible = false
-    director.add(envelope); missionStack.push(envelope)
-  }
-  block(-7.8, -3.4, 1.2)
-  // Fine wall obstacles leave the boss office portal open and keep wandering bots off its glass.
-  for (let i = 1; i < 6; i++) for (let t = 0; t <= 1; t += 0.15) {
-    const a = i * Math.PI / 3, b = (i + 1) * Math.PI / 3
-    block(-7.8 + (Math.cos(a) * (1 - t) + Math.cos(b) * t) * 2.35, -3.4 + (Math.sin(a) * (1 - t) + Math.sin(b) * t) * 2.35, 0.08)
-  }
+  // Atlas's HQ, at the back left, outside the arrival lane.
+  const hq = createHeadquarters(style)
+  const hqAt = { x: -7.6, z: -2.4 }
+  hq.group.position.set(hqAt.x, 0, hqAt.z)
+  group.add(hq.group)
+  for (const o of hq.obstacles) block(hqAt.x + o.x, hqAt.z + o.z, o.r)
 
   let last = ''
   let office = {}
   return {
     group,
     obstacles,
-    targets: [{ mesh: director, action: 'director' }, ...(board ? [{ mesh: board.mesh, action: 'director' }] : [])],
-    director,
+    // What a click on the commons can open: a screen opens its own tab of the HQ panel.
+    targets: [...hq.targets, ...(board ? [{ mesh: board.mesh, action: 'briefing' }] : [])],
+    director: hq.group,
+    setHover: (action, mesh) => hq.setHover(action, mesh),
     setOffice(data) {
-      office = data; last = ''; beacon.material.color.set(data.lowEnergy ? 0xffbf65 : 0x81edc4)
-      for (let i = 0; i < missionStack.length; i++) missionStack[i].visible = i < (data.missions || 0)
+      office = { missions: data.missions, lowEnergy: data.lowEnergy, tokens: data.tokens }
+      last = ''
+      hq.setOffice(data)
     },
     update(elapsed, reducedMotion) {
-      head.position.y = 1.38 + (reducedMotion ? 0 : Math.sin(elapsed * 1.3) * 0.025)
-      head.rotation.y = reducedMotion ? 0 : Math.sin(elapsed * 0.4) * 0.1
+      hq.update(elapsed, reducedMotion)
     },
     setStats(stats) {
       if (!board) return

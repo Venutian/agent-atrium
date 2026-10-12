@@ -28,7 +28,7 @@ import {
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 import { withErrands } from './game/errands.js'
 import { AttentionAlerts } from './ui/alerts.js'
-import { EnergyAlerts } from './game/office-data.js'
+import { EnergyAlerts, dailyUsage } from './game/office-data.js'
 import { formatTokens } from './ui/usage.js'
 
 /**
@@ -88,6 +88,17 @@ const hoverGround = new THREE.Vector3()
 
 const actions = {
   refreshOffice: () => refreshOffice(),
+  /** Fly to Atlas's HQ; from there, a second press opens the panel. */
+  visitHq: () => {
+    const hq = atrium.commons?.director
+    if (!hq) return hud.toggleUsage(true)
+    const at = hq.getWorldPosition(new THREE.Vector3())
+    if (rig.following) select(null, {})
+    if (engine.camera.position.distanceTo(at) < 22) { hud.toggleUsage(true); refreshOffice(); return }
+    rig.focus(at, { distance: 18 })
+    refreshOffice()
+    hud.toast('Atlas’s HQ: click a screen or the trophy cabinet for the details')
+  },
   visitCrew: id => {
     const thread = threads.find(t => t.id === id)
     if (!thread) return hud.toast('This bot is no longer in the scan', 'err')
@@ -573,7 +584,10 @@ engine.canvas.addEventListener('pointermove', (e) => {
   atrium.setHoveredPlot(plot)
   // A plot is grabbable as well as clickable, so it gets the hand rather than the finger:
   // 'pointer' promised only a click and hid the hold-to-drag entirely.
-  engine.canvas.style.cursor = agent || atrium.pickOffice(p.x, p.y) ? 'pointer' : 'grab'
+  // A screen in Atlas's HQ lights up under the pointer: it is a door to that tab.
+  const office = agent ? null : atrium.pickOffice(p.x, p.y)
+  atrium.commons?.setHover(office)
+  engine.canvas.style.cursor = agent || office ? 'pointer' : 'grab'
 })
 
 /**
@@ -849,8 +863,9 @@ engine.canvas.addEventListener('pointerup', (e) => {
   // long-pressing a plot and thinking better of it should not also open its sidebar.
   if (e.button !== 0 || !rig.wasClick || drag.lifted || drag.swallowClick) return
   const p = ndc(e)
-  if (atrium.pickOffice(p.x, p.y)) {
-    hud.toggleUi(true); hud.toggleUsage(true); refreshOffice(); return
+  const officeView = atrium.pickOffice(p.x, p.y)
+  if (officeView) {
+    hud.toggleUi(true); hud.toggleUsage(true); hud.officeHub.show(officeView); refreshOffice(); return
   }
   const agent = atrium.pick(p.x, p.y, p.aspect)
   if (agent) {
@@ -1260,8 +1275,28 @@ const energyAlerts = new EnergyAlerts({
 function syncOffice() {
   const warnings = energyAlerts.update(hud.usage || {}, { threshold: settings.get('quotaThreshold'), dailyBudget: settings.get('dailyTokenBudget') })
   hud.setOffice(officeSnapshot, warnings)
-  const missions = (officeSnapshot.missions || []).filter(m => !['done', 'cancelled'].includes(m.status)).length
-  atrium.setOfficeData({ ...officeSnapshot, board: { missions, lowEnergy: warnings.length, tokens: hud.usage?.measured ? formatTokens(hud.usage.totalTokens) : '—' } })
+  atrium.setOfficeData({ ...officeSnapshot, board: officeBoard(officeSnapshot, hud.usage || {}, atrium.stats || {}, warnings) })
+}
+/** Everything the HQ's screens and trophy cabinet show, from data the page already has. */
+function officeBoard(office, usage, stats, warnings) {
+  const open = (office.missions || []).filter(m => !['done', 'cancelled'].includes(m.status))
+  const days = dailyUsage(usage.byDay || [])
+  const health = office.health || []
+  return {
+    missions: open.length, lowEnergy: warnings.length, tokens: usage.measured ? formatTokens(usage.totalTokens) : '—',
+    xp: office.xp || 0, missionCount: (office.missions || []).length,
+    openMissions: open.slice(0, 4).map(m => ({ brief: m.brief, target: m.targetTitle, status: m.status })),
+    working: stats.working || 0, waiting: stats.waiting || 0, blocked: stats.blocked || 0,
+    celebrating: stats.celebrating || 0, agents: stats.agents || 0,
+    days: days.map(d => ({ totalTokens: d.totalTokens, cachedInputTokens: d.cachedInputTokens })),
+    todayTokens: days.at(-1)?.totalTokens || 0,
+    passing: health.filter(h => h.checks === 'passed').length,
+    failing: health.filter(h => h.checks === 'failed' || (h.tests === 'failed' && !h.testsStale)).length,
+    prs: health.filter(h => h.pr?.state === 'OPEN').length,
+    merged: health.filter(h => h.pr?.state === 'MERGED').length,
+    localModels: (office.localModels?.servers || []).filter(s => s.status === 'online').length,
+    events: (office.events || []).slice(0, 5).map(e => ({ kind: e.kind, title: e.title })),
+  }
 }
 async function refreshOffice() {
   if (officePolling) return
