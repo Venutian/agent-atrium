@@ -4,6 +4,7 @@ import { STATUS_LABEL } from '../game/atrium.js'
 import { FACE, FRAME_COLS, FRAME_ROWS } from '../agents/faces.js'
 import { PLOT_PALETTE, hashString } from '../world/plots.js'
 import { usageStats, formatTokens, exactTokens, allowanceWindow, contextRemaining } from './usage.js'
+import { OfficeHub } from './office-hub.js'
 
 /**
  * The whole HUD, in plain DOM.
@@ -80,6 +81,7 @@ export class Hud {
     this._buildSettings()
     this._buildAvatar()
     this._wire()
+    this.officeHub = new OfficeHub(this)
     this.syncSettings()
     // Read layout when panels resize/change, never in the animation loop.
     this._layoutObserver = new ResizeObserver(() => this._syncLayout())
@@ -387,7 +389,7 @@ export class Hud {
       e.stopPropagation()
       if (e.key === 'Escape') { e.preventDefault(); this.toggleUsage(false); return }
       if (e.key !== 'Tab') return
-      const buttons = [...this.$('.usage-dashboard').querySelectorAll('button')]
+      const buttons = [...this.$('.usage-dashboard').querySelectorAll('button, a[href], input, select, textarea')].filter(el => !el.disabled && el.offsetParent !== null)
       const first = buttons[0], last = buttons.at(-1)
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
@@ -504,8 +506,14 @@ export class Hud {
 
   setUsage(threads) {
     this.usage = usageStats(threads)
+    this.usageThreads = threads
     this.$('#btn-usage .usage-total').textContent = this.usage.measured ? `${formatTokens(this.usage.totalTokens)} tokens` : 'View usage'
-    if (this.$('.usage-dashboard').classList.contains('open')) this._renderUsage()
+    this.officeHub?.setData(threads, this.officeSnapshot, this.usage, this.energyWarnings)
+  }
+
+  setOffice(snapshot, warnings = []) {
+    this.officeSnapshot = snapshot; this.energyWarnings = warnings
+    this.officeHub?.setData(this.usageThreads || [], snapshot, this.usage, warnings)
   }
 
   _renderUsage() {
@@ -544,7 +552,7 @@ export class Hud {
     panel.classList.toggle('open', open)
     panel.inert = !open
     this.$('#btn-usage').setAttribute('aria-expanded', String(open))
-    if (open) { this._renderUsage(); this.$('#btn-close-usage').focus({ preventScroll: true }) }
+    if (open) { this.officeHub?.onOpen(); this.$('#btn-close-usage').focus({ preventScroll: true }) }
     else if (panel.contains(document.activeElement)) this.$('#btn-usage').focus({ preventScroll: true })
   }
 
@@ -1248,7 +1256,7 @@ const TEMPLATE = `
   </header>
 
   <div class="stats"></div>
-  <button class="btn ghost usage-launch" id="btn-usage" aria-expanded="false"><span>Office stats</span><span class="usage-total">View usage</span></button>
+  <button class="btn ghost usage-launch" id="btn-usage" aria-expanded="false"><span>Visit Atlas · HQ</span><span class="usage-total">Office stats</span></button>
 
   <div class="side-body">
     <div class="projects-pane">

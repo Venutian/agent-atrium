@@ -165,6 +165,8 @@ const DEFAULTS = {
   showLabels: true,
   reducedMotion: false,
   notifications: false,
+  quotaThreshold: 20,
+  dailyTokenBudget: 0,
 
   // Opening
   openIn: 'app', // 'app' | 'terminal' — the harness's desktop app, or its CLI in a new window

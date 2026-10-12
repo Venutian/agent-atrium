@@ -216,6 +216,7 @@ export class Atrium {
     this.commons.group.position.set(desk.x, floorHeight(), desk.z)
     this.worldGroup.add(this.commons.group)
     if (this.stats) this.commons.setStats(this.stats)
+    if (this.officeData) this.setOfficeData(this.officeData)
     this._dustTint.set(this.style.floor.seam)
 
     // Only when the style itself changed, so an unrelated setting does not put every drone
@@ -307,7 +308,7 @@ export class Atrium {
     const dormant = new Set()
     if (this.settings.get('hideDormant')) {
       for (const [name, list] of byProject) {
-        if (list.every((t) => statusFor(t, now) === 'sleeping')) dormant.add(name)
+        if (!this.sessionReveals?.has(name) && list.every((t) => statusFor(t, now) === 'sleeping')) dormant.add(name)
       }
       // Never fold away everything: an atrium that answers a poll with an empty planet reads as
       // broken rather than tidy, and there is nothing on screen to tell you which it was.
@@ -930,6 +931,7 @@ export class Atrium {
       ripple: () => {},
       sound: (name, x, y, z) => this.onSound?.(name, x, y, z),
     }))
+    this.commons?.update(elapsed, this.settings.get('reducedMotion'))
     this._updatePlots(night, elapsed)
     this._updateLabels(dt)
     this.reflections.update(dt, focus || this.sky.focus, this.camera)
@@ -1066,6 +1068,31 @@ export class Atrium {
 
   pick(ndcX, ndcY, aspect) {
     return this.bots.pick(this.camera, ndcX, ndcY, aspect)
+  }
+
+  /** The director and board share a destination; bend bounds like the renderer. */
+  pickOffice(ndcX, ndcY) {
+    const ray = this._officeRay || (this._officeRay = new THREE.Raycaster())
+    ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera)
+    const box = new THREE.Box3(), bentBox = new THREE.Box3(), point = new THREE.Vector3(), hit = new THREE.Vector3()
+    let closest = Infinity, chosen = null
+    for (const target of this.commons?.targets || []) {
+      target.mesh.updateWorldMatrix(true, true)
+      box.setFromObject(target.mesh); bentBox.makeEmpty()
+      for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) bentBox.expandByPoint(bendPoint(point.set(x, y, z)))
+      if (ray.ray.intersectBox(bentBox, hit)) {
+        const distance = hit.distanceTo(ray.ray.origin)
+        if (distance < closest) { closest = distance; chosen = target.action }
+      }
+    }
+    return chosen
+  }
+
+  setOfficeData(data) {
+    this.officeData = data
+    this.commons?.setOffice(data.board || {})
+    this.commons?.setStats(this.stats)
+    for (const plot of this.plotOrder || []) plot.label?.userData.setHealth?.((data.health || []).find(h => h.project === plot.name))
   }
 
   agentFor(id) {

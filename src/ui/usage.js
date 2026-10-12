@@ -7,7 +7,8 @@ export const formatTokens = value => new Intl.NumberFormat(undefined, { notation
 export const exactTokens = value => new Intl.NumberFormat().format(n(value))
 
 export function usageStats(threads) {
-  const report = { ...totals(), sessions: 0, measured: 0, partial: 0, assistants: [], models: [], repos: [], limits: [] }
+  const report = { ...totals(), sessions: 0, measured: 0, partial: 0, assistants: [], models: [], repos: [], limits: [], byDay: [] }
+  const days = new Map()
   const assistants = new Map(), models = new Map(), repos = new Map(), limits = new Map(), seen = new Set()
   const group = (map, id, label) => {
     if (!map.has(id)) map.set(id, { id, label, ...totals(), sessions: 0, measured: 0 })
@@ -31,6 +32,11 @@ export function usageStats(threads) {
         model.assistant = assistant.label; model.sessions++; model.measured++
         sum(model, row)
       }
+      for (const row of u.byDay || []) {
+        const key = `${row.day}:${thread.harness}:${row.model}`
+        if (!days.has(key)) days.set(key, { day: row.day, model: row.model, assistant: assistant.label, ...totals() })
+        sum(days.get(key), row)
+      }
     }
     for (const limit of u?.limits || []) {
       const key = `${thread.harness}:${limit.id}`
@@ -42,6 +48,7 @@ export function usageStats(threads) {
   const sorted = map => [...map.values()].sort((a, b) => b.totalTokens - a.totalTokens || a.label.localeCompare(b.label))
   report.assistants = sorted(assistants); report.models = sorted(models); report.repos = sorted(repos)
   report.limits = [...limits.values()]
+  report.byDay = [...days.values()].sort((a, b) => a.day.localeCompare(b.day))
   return report
 }
 

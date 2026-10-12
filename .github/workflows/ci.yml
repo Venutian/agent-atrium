@@ -1,0 +1,33 @@
+name: Test and build
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Check Ubuntu launcher
+        if: runner.os == 'Linux'
+        run: bash -n tools/launch.sh
+      - name: Smoke-test Linux startup
+        if: runner.os == 'Linux'
+        run: |
+          bash tools/launch.sh --headless
+          curl --fail http://127.0.0.1:5274/api/health
+          bash tools/launch.sh --stop

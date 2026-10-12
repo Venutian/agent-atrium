@@ -22,10 +22,14 @@ import {
   planMessage,
   sendMessage,
   fetchJobs,
+  fetchOffice,
+  missionAction,
 } from './game/api.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 import { withErrands } from './game/errands.js'
 import { AttentionAlerts } from './ui/alerts.js'
+import { EnergyAlerts } from './game/office-data.js'
+import { formatTokens } from './ui/usage.js'
 
 /**
  * Boot and the outer game loop.
@@ -83,6 +87,34 @@ const hoverGround = new THREE.Vector3()
 // ── actions the HUD can trigger ────────────────────────────────────────────────────────
 
 const actions = {
+  refreshOffice: () => refreshOffice(),
+  visitCrew: id => {
+    const thread = threads.find(t => t.id === id)
+    if (!thread) return hud.toast('This bot is no longer in the scan', 'err')
+    if (thread.archived) return hud.toast('This session is archived in its assistant. Restore it there first.')
+    state.archived = state.archived.filter(value => value !== id)
+    revealRoom(thread.project)
+    select(id, { fly: true }); queueSave()
+  },
+  visitRoom: name => { revealRoom(name); selectProject(name, { fly: true }) },
+  createMission: async body => {
+    await missionAction({ ...body, action: 'create' }); await refreshOffice()
+    hud.toast('Atlas sealed your mission packet')
+  },
+  updateMission: async (id, action) => {
+    await missionAction({ id, action }); await refreshOffice()
+    hud.toast(action === 'done' ? 'Mission cleared · +100 office XP' : 'Mission updated')
+  },
+  deliverMission: async mission => {
+    const target = threads.find(t => t.id === mission.targetId)
+    if (!target) throw new Error('The receiving bot is no longer available')
+    let copied = false
+    try { await navigator.clipboard.writeText(mission.packet); copied = true } catch { /* prefilled links still work */ }
+    const result = await sendMessage(target, mission.packet, { via: 'app', allowEdits: false })
+    if (!result.prefilled && !copied) throw new Error('Opened the agent app. Clipboard unavailable: copy the unsealed packet and paste it there.')
+    await missionAction({ id: mission.id, action: 'delivered' }); await refreshOffice()
+    hud.toast(result.prefilled ? 'Mission opened in the agent app. Review and send it there.' : 'Mission copied. Paste and send it in the agent app.')
+  },
   enableNotifications: async () => {
     if (!('Notification' in window)) return hud.toast('Browser notifications are unavailable here', 'err')
     if (settings.get('notifications')) { settings.set('notifications', false); return }
@@ -399,6 +431,12 @@ function selectProject(name, { fly = false } = {}) {
   if (fly) actions.focusProject(name)
 }
 
+function revealRoom(name) {
+  state.hiddenProjects = unhideProject(state.hiddenProjects || [], name)
+  atrium.sessionReveals ??= new Set(); atrium.sessionReveals.add(name)
+  applyThreads(threads); queueSave()
+}
+
 /**
  * The repo folder behind a zone. Plots are keyed by the folder's *name*, which is all the
  * atrium needs to draw one — the path itself lives on the threads, so it is read back off
@@ -535,7 +573,7 @@ engine.canvas.addEventListener('pointermove', (e) => {
   atrium.setHoveredPlot(plot)
   // A plot is grabbable as well as clickable, so it gets the hand rather than the finger:
   // 'pointer' promised only a click and hid the hold-to-drag entirely.
-  engine.canvas.style.cursor = agent ? 'pointer' : 'grab'
+  engine.canvas.style.cursor = agent || atrium.pickOffice(p.x, p.y) ? 'pointer' : 'grab'
 })
 
 /**
@@ -758,7 +796,7 @@ engine.canvas.addEventListener('pointerdown', (e) => {
   // The camera reads these modifiers as "tilt and rotate" — that press is never a lift.
   if (e.button !== 0 || e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return
   const p = ndc(e)
-  if (atrium.pick(p.x, p.y, p.aspect)) return // a press on a bot is a selection
+  if (atrium.pickOffice(p.x, p.y) || atrium.pick(p.x, p.y, p.aspect)) return // a press on a bot or HQ is a selection
   const plot = plotUnder(e, p)
   if (!plot) return
   drag.candidate = plot.name
@@ -811,6 +849,9 @@ engine.canvas.addEventListener('pointerup', (e) => {
   // long-pressing a plot and thinking better of it should not also open its sidebar.
   if (e.button !== 0 || !rig.wasClick || drag.lifted || drag.swallowClick) return
   const p = ndc(e)
+  if (atrium.pickOffice(p.x, p.y)) {
+    hud.toggleUi(true); hud.toggleUsage(true); refreshOffice(); return
+  }
   const agent = atrium.pick(p.x, p.y, p.aspect)
   if (agent) {
     select(agent.id, {})
@@ -991,6 +1032,7 @@ function applyThreads(list) {
   const stats = atrium.setThreads(list, archivedSet, hiddenSet, known)
   hud.setStats(stats)
   hud.setUsage(list)
+  if (officeSnapshot) syncOffice()
   frameOffice()
   const folded = atrium.dormantProjects || new Set()
   const onFloor = [...atrium.threads.values()].filter((t) => !archivedSet.has(t.id) && !hiddenSet.has(t.project) && !folded.has(t.project))
@@ -1204,6 +1246,31 @@ async function poll() {
   }
 }
 
+let officeSnapshot = null, officePolling = false
+const energyAlerts = new EnergyAlerts({
+  read: () => JSON.parse(localStorage.getItem('agentatrium.energy-alerts') || '[]'),
+  write: seen => localStorage.setItem('agentatrium.energy-alerts', JSON.stringify(seen)),
+  notify: text => {
+    hud.toast(`Atlas: ${text}`)
+    if (settings.get('notifications') && document.hidden && window.Notification?.permission === 'granted') {
+      try { const notice = new Notification('Atlas · energy watch', { body: text, tag: 'agent-atrium-energy' }); notice.onclick = () => { window.focus(); hud.toggleUsage(true); hud.officeHub.show('energy'); notice.close() } } catch { /* OS may suppress delivery */ }
+    }
+  },
+})
+function syncOffice() {
+  const warnings = energyAlerts.update(hud.usage || {}, { threshold: settings.get('quotaThreshold'), dailyBudget: settings.get('dailyTokenBudget') })
+  hud.setOffice(officeSnapshot, warnings)
+  const missions = (officeSnapshot.missions || []).filter(m => !['done', 'cancelled'].includes(m.status)).length
+  atrium.setOfficeData({ ...officeSnapshot, board: { missions, lowEnergy: warnings.length, tokens: hud.usage?.measured ? formatTokens(hud.usage.totalTokens) : '—' } })
+}
+async function refreshOffice() {
+  if (officePolling) return
+  officePolling = true
+  try { officeSnapshot = await fetchOffice(); syncOffice() }
+  catch (err) { hud.toast(err.message || 'Atlas could not read the office', 'err') }
+  finally { officePolling = false }
+}
+
 function queueSave() {
   clearTimeout(pendingSave)
   pendingSave = setTimeout(async () => {
@@ -1256,7 +1323,9 @@ async function boot() {
   ])
 
   await poll()
+  refreshOffice()
   setInterval(poll, POLL_MS)
+  setInterval(refreshOffice, 30000)
   watchJobs(0)
   window.addEventListener('focus', poll)
   // A tab that was hidden for an hour should catch up the moment it comes back.

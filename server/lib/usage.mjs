@@ -15,12 +15,20 @@ export function tokenTotals(inputTokens, outputTokens, cachedInputTokens = 0, ca
     cacheWriteTokens: n(cacheWriteTokens), reasoningTokens: n(reasoningTokens), totalTokens: n(inputTokens) + n(outputTokens) }
 }
 
-function add(state, model, tokens) {
+function add(state, model, tokens, at = 0) {
   const key = modelName(model)
   const row = state.models.get(key) || { model: key, ...empty() }
   for (const k of fields) row[k] += tokens[k] || 0
   state.models.set(key, row)
   state.known = true
+  if (at > 0) {
+    state.days ??= new Map()
+    const day = new Date(at).toISOString().slice(0, 10)
+    const dayKey = `${day}:${key}`
+    const daily = state.days.get(dayKey) || { day, model: key, ...empty() }
+    for (const k of fields) daily[k] += tokens[k] || 0
+    state.days.set(dayKey, daily)
+  }
 }
 
 function limitsOf(raw, observedAt) {
@@ -51,11 +59,12 @@ function consume(state, kind, r) {
     const combined = { ...tokens }
     if (previous) {
       for (const k of fields) combined[k] = Math.max(combined[k], previous.tokens[k])
-      add(state, previous.model, Object.fromEntries(fields.map(k => [k, -previous.tokens[k]])))
+      add(state, previous.model, Object.fromEntries(fields.map(k => [k, -previous.tokens[k]])), previous.at)
     }
     const model = modelName(m.model)
-    add(state, model, combined)
-    state.messages.set(m.id, { model, tokens: combined })
+    const messageAt = previous?.at || at
+    add(state, model, combined, messageAt)
+    state.messages.set(m.id, { model, tokens: combined, at: messageAt })
     state.observedAt = Math.max(state.observedAt, at)
   } else {
     const p = r.payload
@@ -71,7 +80,7 @@ function consume(state, kind, r) {
       // Cumulative snapshots must never be added together. A reset starts a new segment.
       const reset = tokens.totalTokens < before.totalTokens
       const delta = Object.fromEntries(fields.map(k => [k, reset ? tokens[k] : Math.max(0, tokens[k] - before[k])]))
-      add(state, state.model, delta)
+      add(state, state.model, delta, at)
       state.previous = tokens
       state.observedAt = Math.max(state.observedAt, at)
     }
@@ -87,7 +96,7 @@ function snapshot(state) {
   const totals = empty()
   const byModel = [...state.models.values()].map(row => ({ ...row }))
   for (const row of byModel) for (const key of fields) totals[key] += row[key]
-  return { ...totals, known: state.known, byModel, observedAt: state.observedAt,
+  return { ...totals, known: state.known, byModel, byDay: [...(state.days?.values() || [])].map(row => ({ ...row })), observedAt: state.observedAt,
     coverage: state.partial ? 'partial' : 'recorded', context: state.context || null, limits: [...state.limits.values()] }
 }
 
@@ -161,9 +170,9 @@ export function vscodeUsage(requests) {
   for (const r of requests) {
     const at = Number(r.responseTimestamp) || Number(r.timestamp) || 0
     const rows = Array.isArray(r.modelTotals) ? r.modelTotals.filter(t => tokenNumber(t.inputTokens) !== null && tokenNumber(t.outputTokens) !== null) : []
-    if (rows.length) for (const t of rows) add(state, t.model, tokenTotals(t.inputTokens, t.outputTokens, t.cachedTokens))
+    if (rows.length) for (const t of rows) add(state, t.model, tokenTotals(t.inputTokens, t.outputTokens, t.cachedTokens), at)
     else if (tokenNumber(r.promptTokens) !== null && tokenNumber(r.completionTokens) !== null) {
-      add(state, r.modelId, tokenTotals(r.promptTokens, r.completionTokens))
+      add(state, r.modelId, tokenTotals(r.promptTokens, r.completionTokens), at)
       state.partial = true
     }
     if (rows.length || tokenNumber(r.promptTokens) !== null) state.observedAt = Math.max(state.observedAt, at)

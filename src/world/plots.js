@@ -600,30 +600,39 @@ export function createLabel(text, accent, style, pixelRatio = 4) {
 
   const canvas = document.createElement('canvas')
   const w = textWidth + dot + gap + pad * 2
-  const h = fontSize + pad * 2
+  const h = fontSize + pad * 2 + 20
   canvas.width = Math.ceil(w * pixelRatio)
   canvas.height = Math.ceil(h * pixelRatio)
   const c = canvas.getContext('2d')
   c.scale(pixelRatio, pixelRatio)
-  c.fillStyle = style.sign.plate
-  c.beginPath()
-  c.roundRect(1, 1, w - 2, h - 2, 12)
-  c.fill()
-  c.strokeStyle = style.sign.edge
-  c.lineWidth = 2
-  c.stroke()
+  // Redrawn in place when the repository's health arrives, so the sign keeps one texture.
+  const draw = (subtitle = 'CREW STATION · CLICK ROOM', healthColor = accent) => {
+    c.clearRect(0, 0, w, h)
+    c.fillStyle = style.sign.plate
+    c.beginPath()
+    c.roundRect(1, 1, w - 2, h - 2, 12)
+    c.fill()
+    c.strokeStyle = style.sign.edge
+    c.lineWidth = 2
+    c.stroke()
 
-  c.font = font
-  c.textAlign = 'left'
-  c.textBaseline = 'middle'
-  const textX = pad + dot + gap
-  const midY = h / 2
-  c.fillStyle = '#' + new THREE.Color(accent).getHexString()
-  c.beginPath()
-  c.arc(pad + dot / 2, midY, dot / 2, 0, Math.PI * 2)
-  c.fill()
-  c.fillStyle = style.sign.text
-  c.fillText(text, textX, midY)
+    c.font = font
+    c.textAlign = 'left'
+    c.textBaseline = 'middle'
+    const textX = pad + dot + gap
+    const midY = fontSize / 2 + pad
+    c.fillStyle = '#' + new THREE.Color(healthColor).getHexString()
+    c.beginPath()
+    c.arc(pad + dot / 2, midY, dot / 2, 0, Math.PI * 2)
+    c.fill()
+    c.fillStyle = style.sign.text
+    c.fillText(text, textX, midY)
+    c.font = '600 12px "Barlow Semi Condensed", ui-sans-serif, system-ui, sans-serif'
+    let line = subtitle
+    while (line.length > 1 && c.measureText(line).width > w - pad * 2) line = line.slice(0, -2) + '…'
+    c.fillText(line, pad, h - 16)
+  }
+  draw()
 
   const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
@@ -634,7 +643,7 @@ export function createLabel(text, accent, style, pixelRatio = 4) {
   texture.generateMipmaps = true
   texture.anisotropy = 8
 
-  const height = 1.16
+  const height = 1.36
   const geo = new THREE.PlaneGeometry(Math.min(6.6, Math.max(3.8, height * (w / h))), height)
   const mat = new THREE.MeshBasicMaterial({
     map: texture,
@@ -661,6 +670,16 @@ export function createLabel(text, accent, style, pixelRatio = 4) {
   }
   mat.customProgramCacheKey = () => 'repository-sign:mounted'
   const mesh = new THREE.Mesh(geo, mat)
+  let healthKey = ''
+  mesh.userData.setHealth = health => {
+    const key = JSON.stringify(health)
+    if (key === healthKey) return
+    healthKey = key
+    const color = health?.status === 'blocked' ? 0xe86f62 : health?.status === 'shipped' ? 0x46bb87 : health?.status === 'in-progress' ? 0xe0ac50 : accent
+    const status = health?.checks !== 'unknown' && health?.checks ? `CI ${health.checks}` : health?.tests !== 'unknown' && health?.tests ? `TESTS ${health.tests}${health.testsStale ? ' (OLD)' : ''}` : 'CHECKS ?'
+    draw(health ? `${health.branch || 'BRANCH ?'} · ${health.changedFiles ?? '?'} CHANGES · ${status}` : undefined, color)
+    texture.needsUpdate = true
+  }
   mesh.userData.physical = true
   mesh.renderOrder = 8
   mesh.frustumCulled = false

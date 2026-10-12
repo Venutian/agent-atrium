@@ -15,6 +15,8 @@ const post = (url, payload) =>
   })
 
 export const fetchThreads = () => req('/api/threads')
+export const fetchOffice = () => req('/api/office')
+export const missionAction = payload => post('/api/missions', payload)
 
 /**
  * The atrium file, and the base every later save is measured against.
