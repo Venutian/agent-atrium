@@ -82,11 +82,12 @@ Logs and errors are in `data/`.
 
 ```bash
 npm ci
-node tools/install-linux.mjs     # --no-startup to skip login, --remove to undo
+node tools/install-linux.mjs     # --no-startup, --no-desktop, --no-dock to skip; --remove to undo
 ```
 
-That adds **Agent Atrium** to the application menu and starts it in the background when you
-log in. `tools/launch.sh` is the launcher it uses: it rebuilds what changed, starts the server
+That adds **Agent Atrium** to the application menu, the Desktop and the dock favourites, and
+starts it in the background when you log in. Run it with the Node you want the shortcuts to use
+(with nvm, `nvm use 24` first). `tools/launch.sh` is the launcher it uses: it rebuilds what changed, starts the server
 for this checkout only, and opens the page. `tools/launch.sh --stop` stops it.
 
 **Any platform, from a terminal:**
