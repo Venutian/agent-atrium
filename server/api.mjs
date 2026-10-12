@@ -8,6 +8,7 @@ import { openInTerminal } from './lib/terminal.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
 import { focusSoon } from './lib/focus.mjs'
 import { listJobs, runningJobFor, startJob } from './lib/jobs.mjs'
+import { officeSnapshot, missionAction } from './office.mjs'
 import {
   defaultHarness,
   harnessStatus,
@@ -496,6 +497,9 @@ export async function apiMiddleware(req, res, next) {
   }
 
   try {
+    if (url.pathname === '/api/health' && req.method === 'GET') {
+      return send(res, 200, { service: 'agent-atrium', workspace: path.resolve(here, '..') })
+    }
     if (url.pathname === '/api/threads' && req.method === 'GET') {
       const threads = await reconcileArchived(await scanThreads())
       // A harness that is present but cannot read its own store says so here, rather than
@@ -551,6 +555,13 @@ export async function apiMiddleware(req, res, next) {
 
     if (url.pathname === '/api/jobs' && req.method === 'GET') {
       return send(res, 200, { jobs: listJobs() })
+    }
+    if (url.pathname === '/api/office' && req.method === 'GET') {
+      return send(res, 200, await officeSnapshot(await scanThreads()))
+    }
+    if (url.pathname === '/api/missions' && req.method === 'POST') {
+      const body = await readJsonBody(req, 32 * 1024)
+      return send(res, ...(await missionAction(body, await scanThreads())))
     }
 
     if (url.pathname === '/api/open' && req.method === 'POST') {

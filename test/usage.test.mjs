@@ -26,6 +26,7 @@ test('Claude usage deduplicates streaming message IDs, includes cache once and a
     const u = await readRecordedUsage(file, 'claude')
     assert.equal(u.inputTokens, 38); assert.equal(u.outputTokens, 13); assert.equal(u.totalTokens, 51)
     assert.equal(u.cachedInputTokens, 20); assert.equal(u.cacheWriteTokens, 3)
+    assert.equal(u.byDay.reduce((sum, row) => sum + row.totalTokens, 0), 51)
     assert.deepEqual(u.byModel.map(m => [m.model, m.totalTokens]), [['model-a', 37], ['model-b', 14]])
     assert.deepEqual(await readRecordedUsage(file, 'claude'), u)
     assert.equal((await readRecordedUsage(file, 'codex')).known, false, 'kind isolates cached interpretations')

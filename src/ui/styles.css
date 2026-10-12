@@ -1315,6 +1315,86 @@ body {
   .usage-summary { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* Atlas's office: five stations in one glass console, entered through the physical HQ. */
+.office-nav { display: flex; gap: 7px; padding: 12px 24px; border-bottom: 1px solid var(--line); overflow-x: auto; flex-shrink: 0; }
+.office-nav .btn { white-space: nowrap; font-size: 12px; }
+.office-nav [aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.office-pane { padding: 22px 24px; overflow-y: auto; min-height: 0; }
+.office-pane[hidden], .office-energy[hidden] { display: none; }
+.office-pane h2 { font-size: 22px; }
+.office-pane h3, .energy-console h3 { font-size: 15px; margin: 20px 0 10px; }
+.office-pane h4 { font-size: 14px; margin: 6px 0; }
+.office-pane p { font-size: 12px; line-height: 1.6; }
+.atlas-welcome { display: flex; align-items: center; gap: 20px; padding-bottom: 10px; }
+.atlas-portrait { flex: 0 0 94px; width: 94px; height: 94px; filter: drop-shadow(0 5px 7px rgba(0,0,0,.15)); }
+.office-eyebrow { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+.atlas-welcome p { color: var(--muted); margin-bottom: 0; }
+.office-rank { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 14px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--amber) 8%, transparent); font-size: 13px; }
+.office-rank progress { grid-column: 1 / -1; width: 100%; height: 8px; accent-color: var(--amber); }
+.office-rank small { grid-column: 1 / -1; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.brief-scoreboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.brief-scoreboard > div { border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+.brief-scoreboard strong { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
+.brief-scoreboard span { color: var(--muted); font-size: 11px; }
+.quest-list { display: grid; gap: 8px; }
+.quest-task { display: flex; align-items: center; gap: 14px; padding: 12px 14px; width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-solid); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.quest-task > span:nth-child(2) { flex: 1; min-width: 0; }
+.quest-task > span:last-child { color: var(--muted); font-size: 11px; }
+.quest-task strong { display: block; overflow-wrap: anywhere; font-size: 13px; }
+.quest-task small { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
+.quest-task:hover { border-color: var(--accent); }
+.quest-gem { display: inline-block; flex-shrink: 0; width: 10px; height: 10px; border: 2px solid currentColor; background: currentColor; color: var(--muted); transform: rotate(45deg); box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 12%, transparent); }
+.blocked .quest-gem, .health-blocked .quest-gem { color: var(--red); }
+.waiting .quest-gem { color: var(--blue); }
+.working .quest-gem, .health-clear .quest-gem, .health-shipped .quest-gem, .mission-done .quest-gem { color: var(--green); }
+.health-in-progress .quest-gem { color: var(--amber); }
+.quest-empty { padding: 18px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.brief-bottom, .workshop-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.quest-card { padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--panel-solid) 55%, transparent); overflow-wrap: anywhere; }
+.quest-card h3 { margin-top: 0; }
+.quest-card p { color: var(--muted); }
+.quest-card a { font-size: 12px; color: var(--accent); }
+.office-field { display: flex; flex-direction: column; gap: 7px; font-size: 12px; color: var(--muted); min-width: 0; }
+.office-field input, .office-field select, .office-field textarea, .crew-filters input, .crew-filters select { font: inherit; color: var(--text); background: var(--panel-solid); border: 1px solid var(--line-strong); border-radius: 9px; padding: 10px; width: 100%; min-width: 0; }
+.office-field textarea { resize: vertical; min-height: 85px; }
+.crew-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.crew-filters input { grid-column: 1 / -1; }
+.crew-results .quest-list { max-height: 340px; overflow-y: auto; }
+.mission-station { border-top: 1px solid var(--line); margin-top: 22px; }
+.mission-pair, .energy-budget { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+#mission-form { display: grid; gap: 12px; }
+#mission-form .btn { justify-self: start; }
+.mission-error { margin: 0; color: var(--muted); }
+.mission-packet { margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-left: 4px solid var(--amber); border-radius: 12px; background: var(--panel-solid); }
+.mission-packet.delivered { border-left-color: var(--blue); }
+.mission-packet.done { border-left-color: var(--green); }
+.mission-packet.cancelled { border-left-color: var(--muted); }
+.mission-packet p { color: var(--muted); }
+.mission-packet details { font-size: 12px; margin: 12px 0; }
+.mission-packet pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--body); color: var(--text); }
+.mission-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.chronicle-event { display: flex; align-items: start; gap: 18px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.chronicle-event .quest-gem { margin: 5px; }
+.chronicle-event p { color: var(--muted); }
+.energy-chart svg { display: block; width: 100%; margin-top: 14px; }
+.energy-budget { padding: 14px 0; }
+.energy-warning { padding: 12px; border-radius: 10px; background: color-mix(in srgb, var(--amber) 14%, transparent); font-size: 12px; margin-bottom: 8px; }
+.workshop-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.workshop-heading > div { flex: 1; }
+.health-title { display: flex; align-items: center; gap: 12px; }
+.health-chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0; }
+.health-chips span { border: 1px solid var(--line); padding: 5px 8px; border-radius: 8px; font-size: 10px; }
+.quest-card > .btn { margin-top: 10px; }
+@media (max-width: 600px) {
+  .office-nav { padding: 10px 16px; }
+  .office-pane { padding: 16px; }
+  .atlas-welcome { gap: 12px; }
+  .atlas-portrait { flex-basis: 68px; width: 68px; height: 68px; }
+  .brief-scoreboard { grid-template-columns: 1fr 1fr; }
+  .brief-bottom, .workshop-grid, .mission-pair, .energy-budget { grid-template-columns: 1fr; }
+  .workshop-heading { align-items: start; flex-direction: column; }
+}
+
 .help .sheet {
   width: min(560px, calc(100vw - 40px));
   padding: 22px 24px;

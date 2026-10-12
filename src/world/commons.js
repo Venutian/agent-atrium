@@ -90,17 +90,17 @@ function statusBoard(style) {
     c.fillRect(0, 0, 1024, 512)
     c.fillStyle = '#7fe0b3'
     c.font = '600 34px "Barlow Semi Condensed", ui-sans-serif, system-ui, sans-serif'
-    c.fillText('AGENT ATRIUM', 52, 74)
+    c.fillText('ATRIUM HQ · DIRECTOR ATLAS', 52, 74)
     const now = new Date()
     c.textAlign = 'right'
     c.fillStyle = '#9fb4bd'
     c.fillText(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 972, 74)
     c.textAlign = 'left'
     const tiles = [
-      ['WORKING', stats.working ?? 0, '#5ce59a'],
-      ['NEED YOU', stats.waiting ?? 0, '#76a8ff'],
-      ['BLOCKED', stats.blocked ?? 0, '#ff6b5f'],
-      ['BOTS', stats.agents ?? 0, '#e8eef0'],
+      ['ON SHIFT', stats.working ?? 0, '#5ce59a'],
+      ['MISSIONS', stats.missions ?? 0, '#76a8ff'],
+      ['LOW ENERGY', stats.lowEnergy ?? 0, '#ffbf65'],
+      ['TOKENS', stats.tokens || '—', '#e8eef0'],
     ]
     tiles.forEach(([label, value, color], i) => {
       const x = 52 + i * 236
@@ -109,12 +109,15 @@ function statusBoard(style) {
       c.roundRect(x, 130, 212, 300, 22)
       c.fill()
       c.fillStyle = color
-      c.font = '700 150px "Barlow Semi Condensed", ui-sans-serif, system-ui, sans-serif'
+      c.font = `700 ${String(value).length > 3 ? 66 : 140}px "Barlow Semi Condensed", ui-sans-serif, system-ui, sans-serif`
       c.fillText(String(value), x + 26, 330)
       c.fillStyle = '#9fb4bd'
       c.font = '600 28px "Barlow Semi Condensed", ui-sans-serif, system-ui, sans-serif'
       c.fillText(label, x + 28, 398)
     })
+    c.fillStyle = '#9fb4bd'
+    c.font = '600 24px "Barlow Semi Condensed", ui-sans-serif, system-ui, sans-serif'
+    c.fillText('CLICK THE BOARD OR ATLAS TO ENTER THE DIRECTOR’S ROOM', 52, 478)
     texture.needsUpdate = true
   }
   draw()
@@ -223,23 +226,109 @@ export function createCommons(style) {
   }
   block(boardAt.x, boardAt.z, 0.6)
 
+  // Atlas has a real glass hex office and a seated silhouette, outside the arrival lane.
+  const director = new THREE.Group()
+  director.name = 'director-atlas'
+  director.position.set(-7.8, 0, -3.4)
+  const boss = new Parts()
+  boss.cyl(2.35, 0.07, style.room.base, 0, 0.04, 0, 6)
+  boss.box(1.9, 0.08, 0.9, f.wood, 0, 0.92, 0.55)
+  for (const x of [-0.75, 0.75]) boss.box(0.07, 0.86, 0.7, style.frame.post, x, 0.46, 0.55)
+  boss.box(0.85, 0.12, 0.65, 0x263944, 0, 0.56, -0.4)
+  boss.box(0.85, 0.9, 0.12, 0x263944, 0, 0.95, -0.68)
+  boss.cyl(0.08, 0.4, 0x263944, 0, 0.23, -0.4, 8)
+  boss.box(0.53, 0.47, 0.3, 0x28546b, 0, 0.88, -0.3)
+  boss.box(0.09, 0.31, 0.035, 0xffcc65, 0, 0.92, -0.13)
+  for (const x of [-0.2, 0.2]) { boss.box(0.17, 0.25, 0.22, 0x28546b, x, 0.5, 0.03); boss.box(0.2, 0.12, 0.36, 0x182d38, x, 0.32, 0.15) }
+  for (const x of [-0.4, 0.4]) boss.box(0.18, 0.15, 0.55, 0x28546b, x, 0.92, 0.08)
+  boss.box(0.52, 0.03, 0.18, 0x182d38, 0, 0.99, 0.62)
+  boss.cyl(0.09, 0.13, 0xf4eee2, 0.68, 1.02, 0.65, 12)
+  const bossMesh = boss.mesh(boss.solid, curved(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5 })))
+  director.add(bossMesh)
+  const headParts = new Parts()
+  headParts.box(0.75, 0.55, 0.4, 0x263944, 0, 0, 0)
+  headParts.box(0.62, 0.42, 0.03, 0x091b24, 0, 0, 0.22)
+  headParts.box(0.07, 0.1, 0.04, 0x81edc4, -0.14, 0.045, 0.245)
+  headParts.box(0.07, 0.1, 0.04, 0x81edc4, 0.14, 0.045, 0.245)
+  headParts.box(0.17, 0.025, 0.04, 0x81edc4, 0, -0.1, 0.245)
+  headParts.cyl(0.045, 0.16, 0xffcc65, 0, 0.35, 0, 8)
+  const head = headParts.mesh(headParts.solid, curved(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4 })))
+  head.position.set(0, 1.38, -0.28)
+  director.add(head)
+  const shell = new Parts()
+  const panes = []
+  for (let i = 0; i < 6; i++) {
+    const a = i * Math.PI / 3, b = (i + 1) * Math.PI / 3
+    const x = Math.cos(a) * 2.35, z = Math.sin(a) * 2.35
+    shell.box(0.08, 2.2, 0.08, style.frame.post, x, 1.16, z)
+    if (i === 0) continue // the portal faces the open floor
+    const mx = (x + Math.cos(b) * 2.35) / 2, mz = (z + Math.sin(b) * 2.35) / 2
+    const ry = -Math.atan2(Math.sin(b) - Math.sin(a), Math.cos(b) - Math.cos(a))
+    const height = mz > 0 ? 1.2 : 2.1
+    shell.box(2.35, 0.07, 0.07, style.frame.top, mx, height + 0.08, mz, ry)
+    const pane = new THREE.BoxGeometry(2.28, height, 0.03)
+    pane.rotateY(ry); pane.translate(mx, height / 2 + 0.08, mz); panes.push(pane)
+  }
+  director.add(shell.mesh(shell.solid, curved(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }))))
+  const glassGeo = mergeGeometries(panes); panes.forEach(p => p.dispose())
+  director.add(new THREE.Mesh(glassGeo, curved(new THREE.MeshStandardMaterial({ color: style.glass.color,
+    opacity: style.glass.opacity, transparent: true, depthWrite: false, roughness: 0.2, side: THREE.DoubleSide }))))
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), curved(new THREE.MeshBasicMaterial({ color: 0x81edc4 })))
+  beacon.position.set(0, 1.85, -0.28); director.add(beacon)
+  if (typeof document !== 'undefined') {
+    const plate = document.createElement('canvas'); plate.width = 768; plate.height = 160
+    const context = plate.getContext('2d')
+    context.fillStyle = style.sign.plate; context.fillRect(0, 0, 768, 160)
+    context.textAlign = 'center'; context.fillStyle = style.sign.text
+    context.font = '700 56px "Barlow Semi Condensed", sans-serif'; context.fillText('ATLAS · DIRECTOR', 384, 72)
+    context.font = '500 30px "Barlow Semi Condensed", sans-serif'; context.fillText('CLICK TO VISIT HQ', 384, 122)
+    const texture = new THREE.CanvasTexture(plate); texture.colorSpace = THREE.SRGBColorSpace
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.7), curved(new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, toneMapped: false })))
+    sign.position.set(0, 2.65, 0.4); director.add(sign)
+  }
+  group.add(director)
+  const missionStack = []
+  for (let i = 0; i < 5; i++) {
+    const envelope = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.045, 0.24), curved(new THREE.MeshStandardMaterial({ color: i % 2 ? 0xd5eaf9 : 0xfff2d6, roughness: 0.65 })))
+    envelope.position.set(-0.62 + (i % 2) * 0.025, 0.995 + i * 0.05, 0.55); envelope.rotation.y = i * 0.08; envelope.visible = false
+    director.add(envelope); missionStack.push(envelope)
+  }
+  block(-7.8, -3.4, 1.2)
+  // Fine wall obstacles leave the boss office portal open and keep wandering bots off its glass.
+  for (let i = 1; i < 6; i++) for (let t = 0; t <= 1; t += 0.15) {
+    const a = i * Math.PI / 3, b = (i + 1) * Math.PI / 3
+    block(-7.8 + (Math.cos(a) * (1 - t) + Math.cos(b) * t) * 2.35, -3.4 + (Math.sin(a) * (1 - t) + Math.sin(b) * t) * 2.35, 0.08)
+  }
+
   let last = ''
+  let office = {}
   return {
     group,
     obstacles,
+    targets: [{ mesh: director, action: 'director' }, ...(board ? [{ mesh: board.mesh, action: 'director' }] : [])],
+    director,
+    setOffice(data) {
+      office = data; last = ''; beacon.material.color.set(data.lowEnergy ? 0xffbf65 : 0x81edc4)
+      for (let i = 0; i < missionStack.length; i++) missionStack[i].visible = i < (data.missions || 0)
+    },
+    update(elapsed, reducedMotion) {
+      head.position.y = 1.38 + (reducedMotion ? 0 : Math.sin(elapsed * 1.3) * 0.025)
+      head.rotation.y = reducedMotion ? 0 : Math.sin(elapsed * 0.4) * 0.1
+    },
     setStats(stats) {
       if (!board) return
       const minute = Math.floor(Date.now() / 60000)
-      const key = `${stats.working}/${stats.waiting}/${stats.blocked}/${stats.agents}/${minute}`
+      const key = `${stats.working}/${stats.waiting}/${stats.blocked}/${stats.agents}/${minute}/${JSON.stringify(office)}`
       if (key === last) return
       last = key
-      board.draw(stats)
+      board.draw({ ...stats, ...office })
     },
     dispose() {
       board?.dispose()
       group.traverse((o) => {
         if (!o.isMesh) return
         o.geometry.dispose()
+        o.material.map?.dispose()
         o.material.dispose()
       })
     },
