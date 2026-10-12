@@ -19,13 +19,22 @@ import { GENERATORS } from './synth.js'
  */
 
 const TABLE = {
+  /** Ventilation: the air of a big glass room. */
   'room-tone': { kind: 'bed', gain: 1 },
+  /** People talking somewhere across the floor, too far off to be words. */
+  'office-murmur': { kind: 'bed', gain: 1 },
 
-  /** A soft servo click and a thud — a drone just set a parcel down. */
+  /** Now and then, somewhere in the office. */
+  'mug-clink': { kind: 'event', gain: 0.8 },
+  'chair-roll': { kind: 'event', gain: 0.7 },
+  'printer': { kind: 'event', gain: 0.6 },
+  'distant-keys': { kind: 'event', gain: 0.8 },
+
+  /** A cardboard thump and a latch — a drone just set a parcel down. */
   'drone-drop': { kind: 'event', gain: 0.7 },
   /**
    * "Yes?" — what a bot says when you click it. Six of them, picked at random, so a
-   * crowd does not answer in one voice. Little robot phrases: two or three chirps.
+   * crowd does not answer in one voice: two or three soft blips each.
    */
   'select-1': { kind: 'event', gain: 0.55 },
   'select-2': { kind: 'event', gain: 0.55 },
@@ -35,7 +44,7 @@ const TABLE = {
   'select-6': { kind: 'event', gain: 0.55 },
   /**
    * "Somebody needs you." The only sound that is allowed to interrupt, so it is the one
-   * that must never grate: two soft marimba notes a fifth apart, and nothing else.
+   * that must never grate: a soft three-note glass bell, and nothing else.
    */
   'chime-attention': { kind: 'event', gain: 0.6 },
 

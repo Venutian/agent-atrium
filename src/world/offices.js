@@ -146,8 +146,23 @@ export const OFFICES = {
   },
 }
 
-/** A big, ventilated room: one quiet layer of air, a touch lower once the office is dark. */
-const ROOM_TONE = Object.freeze({ beds: Object.freeze([Object.freeze({ sound: 'room-tone', day: 1, night: 0.7 })]) })
+/**
+ * A working office: ventilation, people talking across the floor, and the odd mug, chair,
+ * keyboard or printer somewhere around you. After dark the talk thins out and only the air
+ * and a late mug of coffee are left.
+ */
+const ROOM_TONE = Object.freeze({
+  beds: Object.freeze([
+    Object.freeze({ sound: 'room-tone', day: 1, night: 0.75 }),
+    Object.freeze({ sound: 'office-murmur', day: 1, night: 0.15 }),
+  ]),
+  events: Object.freeze([
+    Object.freeze({ sound: 'mug-clink', every: [20, 50], gain: 0.8 }),
+    Object.freeze({ sound: 'chair-roll', every: [30, 75], when: 'day', gain: 0.7 }),
+    Object.freeze({ sound: 'distant-keys', every: [12, 30], when: 'day', gain: 0.7 }),
+    Object.freeze({ sound: 'printer', every: [90, 200], when: 'day', gain: 0.6 }),
+  ]),
+})
 for (const style of Object.values(OFFICES)) style.audio ??= ROOM_TONE
 
 export const OFFICE_ORDER = ['glass', 'beige', 'oak', 'garden', 'night']
