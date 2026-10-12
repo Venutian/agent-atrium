@@ -1235,8 +1235,9 @@ export class Bots {
 
     const to = this._v.set(agent.workSpot.x - agent.pos.x, 0, agent.workSpot.z - agent.pos.z)
     const d = to.length()
-    // Right up to the desk: a bot typing an arm's length short of its keyboard reads as lost.
-    if (d > 0.22 && !agent.driftBlocked && agent.checkStart < 0) {
+    // Give a seated worker room for ordinary separation nudges. A tiny walk/stand boundary
+    // made two neighbouring workers repeatedly step back into each other's clearance.
+    if (d > 0.4 && !agent.driftBlocked && agent.checkStart < 0) {
       this._walk(agent, to, d, dt, DRIFT_PACE)
       if (agent.blocked || agent.stuckFor > 1) {
         agent.driftBlocked = true
