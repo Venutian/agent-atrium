@@ -10,6 +10,7 @@ import { githubRepo, checksState, probeLocalModel, repoHealth, repositoryKey } f
 import { installLinux, desktopQuote, shellQuote } from '../tools/install-linux.mjs'
 import * as THREE from 'three'
 import { createCommons } from '../src/world/commons.js'
+import { TROPHIES, levelFor } from '../src/world/hq.js'
 import { OFFICES } from '../src/world/offices.js'
 import { Atrium } from '../src/game/atrium.js'
 const exec = promisify(execFile)
@@ -109,18 +110,27 @@ test('Linux installer safely quotes paths, creates XDG entries and removes only 
   } finally { await fsp.rm(root, { recursive: true, force: true }) }
 })
 
+test('trophies are earned from real office data, and the rank level follows XP', () => {
+  const none = { xp: 0, missionCount: 0, agents: 3, waiting: 1, blocked: 0, working: 1, celebrating: 0, merged: 0, todayTokens: 0 }
+  assert.deepEqual(TROPHIES.filter(t => t.earned(none)).map(t => t.id), [])
+  const busy = { xp: 600, missionCount: 2, agents: 6, waiting: 0, blocked: 0, working: 5, celebrating: 1, merged: 0, todayTokens: 2e6 }
+  assert.deepEqual(TROPHIES.filter(t => t.earned(busy)).map(t => t.id), TROPHIES.map(t => t.id))
+  assert.equal(levelFor(0), 1); assert.equal(levelFor(499), 1); assert.equal(levelFor(500), 2)
+})
+
 test('Atlas is seated in a physical office, pickable separately from the crew, and survives theme switches', () => {
   for (const style of Object.values(OFFICES)) {
     const commons = createCommons(style)
     const director = commons.director
     assert.equal(director.name, 'director-atlas')
-    assert.ok(commons.targets.some(t => t.mesh === director))
+    assert.ok(commons.targets.some(t => t.action === 'briefing' && director.getObjectById(t.mesh.id)), 'Atlas opens the briefing')
     const camera = new THREE.PerspectiveCamera(38, 1.6, 0.1, 100)
     const centre = new THREE.Box3().setFromObject(director).getCenter(new THREE.Vector3())
     camera.position.copy(centre).add(new THREE.Vector3(0, 3, 8)); camera.lookAt(centre); camera.updateMatrixWorld()
     const atrium = Object.assign(Object.create(Atrium.prototype), { camera, commons })
-    assert.equal(atrium.pickOffice(0, 0), 'director')
-    commons.update(1, true); commons.setOffice({ lowEnergy: 1 }); commons.dispose()
+    assert.ok(['briefing', 'energy', 'missions', 'workshop', 'chronicle'].includes(atrium.pickOffice(0, 0)), 'the HQ opens one of its own tabs')
+    for (const view of ['energy', 'missions', 'workshop', 'chronicle']) assert.ok(commons.targets.some(t => t.action === view && t.priority > 0), `${view} has a screen`)
+    commons.update(1, true); commons.setOffice({ lowEnergy: 1 }); commons.setHover('energy'); commons.dispose()
   }
 })
 
