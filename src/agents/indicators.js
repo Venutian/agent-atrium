@@ -1,16 +1,6 @@
 import * as THREE from 'three'
 import { OVERLAY_LAYER } from '../core/engine.js'
 import { withCurve } from '../core/curve.js'
-import {
-  mdiHelpCircle,
-  mdiAlert,
-  mdiKeyboardVariant,
-  mdiCheckBold,
-  mdiPause,
-  mdiSleep,
-  mdiCreation,
-  mdiLogout,
-} from '@mdi/js'
 
 /**
  * The status badges that float above each bot's head.
@@ -256,12 +246,30 @@ export class Indicators {
 }
 
 /**
- * The badge symbols, in atlas order. Solid rather than outlined: a badge is a lit chip seen
- * at a glance across an atrium, and an outline at that size is mostly the hole in the middle
- * — the glyph has to carry as a silhouette. Material's set is drawn filled to begin with,
- * one closed path per icon, so there is nothing to stroke and nothing to parse.
+ * The badge symbols, in atlas order: Agent Atrium's own glyphs on a 24-unit grid. Heavy
+ * strokes with round ends rather than outlines: a badge is a lit chip seen at a glance
+ * across an atrium, so each glyph has to carry as a silhouette. `stroke` is drawn at
+ * `width`; `fill` holds the solid parts — the dot under a ? or !, the keys, a sparkle.
  */
-const ICON_PATHS = [mdiHelpCircle, mdiAlert, mdiKeyboardVariant, mdiCheckBold, mdiPause, mdiSleep, mdiCreation, mdiLogout]
+const GLYPHS = [
+  // waiting: a question
+  { stroke: 'M8.4 8.9a3.6 3.6 0 1 1 5.4 3.1c-1.1.65-1.8 1.4-1.8 2.7v.3', width: 3.2, fill: 'M12 17.2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z' },
+  // blocked: a stop mark
+  { stroke: 'M12 4.5v9.5', width: 3.4, fill: 'M12 17.2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z' },
+  // working: a keyboard
+  { stroke: 'M4.5 6.5h15a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z', width: 2.2,
+    fill: 'M6 9.2h2v2H6zM9.3 9.2h2v2h-2zM12.7 9.2h2v2h-2zM16 9.2h2v2h-2zM8 13h8v1.9H8z' },
+  // done: a tick
+  { stroke: 'M5 12.6l4.4 4.4L19 7.4', width: 3.6 },
+  // paused
+  { stroke: 'M9 6v12M15 6v12', width: 3.8 },
+  // sleeping: z z
+  { stroke: 'M4 10.5h5.5L4 17h5.5M13 4.5h7l-7 8.5h7', width: 2.6 },
+  // spawning: two sparks
+  { fill: 'M11 2.5c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5 4.6-.7 6.8-2.9 7.5-7.5zM18.5 14.5c.35 2.1 1.3 3.05 3.4 3.4-2.1.35-3.05 1.3-3.4 3.4-.35-2.1-1.3-3.05-3.4-3.4 2.1-.35 3.05-1.3 3.4-3.4z' },
+  // leaving: out through a door
+  { stroke: 'M10 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2H10M14.5 7.5 19 12l-4.5 4.5M19 12H9.5', width: 2.8 },
+]
 
 /**
  * The badge atlas. Red channel = the glyph, green channel = the plate's alpha — packing two
@@ -290,9 +298,7 @@ function buildBadgeAtlas(cellSize = 512) {
   const ctx = canvas.getContext('2d')
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-  const icons = ICON_PATHS.map((d) => new Path2D(d))
-
-  icons.forEach((icon, index) => {
+  GLYPHS.forEach((glyph, index) => {
     const x = (index % COLS) * cellSize
     const y = Math.floor(index / COLS) * cellSize
     ctx.save()
@@ -318,7 +324,7 @@ function buildBadgeAtlas(cellSize = 512) {
 
     // Red channel: the glyph. Additive so it lights up inside the plate the shader draws.
     ctx.fillStyle = 'rgb(255,0,0)'
-    drawIcon(ctx, icon)
+    drawIcon(ctx, glyph)
     ctx.restore()
     ctx.restore()
   })
@@ -372,15 +378,9 @@ function platePath(ctx) {
 /**
  * The eight symbols, in atlas order: waiting, blocked, working, done, paused, sleeping,
  * spawning, leaving.
- *
- * Material Design Icons, imported as path data rather than drawn here. Eight symbols that have
- * to look like one family is a type problem — one weight, one optical size, one set of
- * terminals — and a set somebody has already balanced beats one assembled a curve at a time.
  */
 
 const ICON_VIEWBOX = 24
-// MDI authors on a 24-unit grid and means the result to be read at 24 pixels. A badge is usually
-// smaller than that, with a lit ring around it competing for the eye.
 
 /**
  * How much of the cell the icon box covers, and where it sits. Centred on the *plate's body*
@@ -393,16 +393,20 @@ const ICON_Y = 0.405
 
 
 /**
- * Filled, never stroked: MDI ships one closed path per icon, so the silhouette *is* the glyph
- * and there is nothing to outline. The path is scaled out of its own 24-unit space into the
- * cell, which is square, so that scale is uniform and nothing skews.
+ * The glyph is scaled out of its own 24-unit space into the cell, which is square, so the
+ * scale is uniform and stroke widths stay in grid units. Drawn in the current fill colour.
  */
-function drawIcon(ctx, icon) {
+function drawIcon(ctx, glyph) {
   ctx.save()
   ctx.translate(ICON_X - ICON_SIZE / 2, ICON_Y - ICON_SIZE / 2)
   ctx.scale(ICON_SIZE / ICON_VIEWBOX, ICON_SIZE / ICON_VIEWBOX)
-  // Nonzero winding, which is what the icons are authored for: the counter in a `?` or the
-  // gap in an exit arrow is a subpath wound the other way, and it has to stay a hole.
-  ctx.fill(icon, 'nonzero')
+  if (glyph.stroke) {
+    ctx.strokeStyle = ctx.fillStyle
+    ctx.lineWidth = glyph.width
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.stroke(new Path2D(glyph.stroke))
+  }
+  if (glyph.fill) ctx.fill(new Path2D(glyph.fill))
   ctx.restore()
 }

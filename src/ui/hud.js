@@ -27,28 +27,44 @@ const IS_MAC = /Mac/.test(navigator.platform)
 const IS_WIN = /Win/.test(navigator.platform)
 const FILE_MANAGER = IS_MAC ? 'Finder' : IS_WIN ? 'Explorer' : 'Files'
 
+/**
+ * Agent Atrium's own icon set: one 24-unit grid, one stroke weight, rounded ends, and the
+ * glass hex of the mark and the rooms wherever a shape has a centre — the settings nut, a
+ * pupil, a lens, the half-lit hex of an office style.
+ */
+const hexPath = (cx, cy, r) => {
+  const p = [-90, -30, 30, 90, 150, 210].map((a) => {
+    const t = (a * Math.PI) / 180
+    return `${+(cx + r * Math.cos(t)).toFixed(2)} ${+(cy + r * Math.sin(t)).toFixed(2)}`
+  })
+  return `<path d="M${p.join('L')}z"/>`
+}
+const svg = (body) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+const EYE = '<path d="M2.8 12C5 7.9 8.2 5.8 12 5.8s7 2.1 9.2 6.2c-2.2 4.1-5.4 6.2-9.2 6.2S5 16.1 2.8 12z"/>'
+const SPEAKER = '<path d="M4.5 9.5h2.8L12 5.7v12.6l-4.7-3.8H4.5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z"/>'
+
 const ICON = {
-  settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
-  eye: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
-  eyeOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19M6.6 6.6C4.06 8.2 2 11 2 11s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24M2 2l20 20"/></svg>`,
-  home: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/><path d="M9.5 20v-6h5v6"/></svg>`,
-  next: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5M12 16h.01"/></svg>`,
-  sun: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`,
-  globe: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg>`,
-  camera: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 8.5h3.2l1.5-2h8.6l1.5 2H21v11H3z"/><circle cx="12" cy="14" r="3.4"/></svg>`,
-  help: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.6v.4"/><path d="M12 17h.01"/></svg>`,
-  open: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-8.5 8.5"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>`,
-  archive: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18v3H3z"/><path d="M5 9v10h14V9"/><path d="M10 13h4"/></svg>`,
-  send: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12h11"/><path d="M4 4.5 20 12 4 19.5l2.6-7.5z"/></svg>`,
-  close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
-  back: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`,
-  plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.7a8 8 0 0 1-8.5 8 9.3 9.3 0 0 1-2.7-.4L4.5 21l1.4-4.1a7.9 7.9 0 0 1-2.4-5.7A8 8 0 0 1 12 3.6a8 8 0 0 1 8.5 8.1z"/><path d="M12 8.6v5.4M9.3 11.3h5.4"/></svg>`,
-  folder: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4A1.4 1.4 0 0 1 4.4 6h4.2l2 2.5h7A1.4 1.4 0 0 1 19 9.9v7.7a1.4 1.4 0 0 1-1.4 1.4H4.4A1.4 1.4 0 0 1 3 17.6z"/></svg>`,
-  copy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>`,
-  locate: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.6"/><path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6"/></svg>`,
-  orbit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><ellipse cx="12" cy="12" rx="10.2" ry="4.6" transform="rotate(-24 12 12)"/><circle cx="21" cy="8.2" r="1.5" fill="currentColor" stroke="none"/></svg>`,
-  sound: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a8 8 0 0 1 0 11"/></svg>`,
-  soundOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>`,
+  settings: svg(hexPath(12, 12, 9) + '<circle cx="12" cy="12" r="3.2"/>'),
+  eye: svg(EYE + hexPath(12, 12, 3)),
+  eyeOff: svg(EYE + hexPath(12, 12, 3) + '<path d="M4.5 19.5 19.5 4.5"/>'),
+  home: svg('<path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/>' + hexPath(12, 12, 3.6)),
+  next: svg('<path d="M7.5 7h9a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-6a3 3 0 0 1 3-3zM12 3.5V7M9.5 12v1.5M14.5 12v1.5"/>'),
+  style: svg(hexPath(12, 12, 9) + '<path d="M12 3v18l-7.8-4.5v-9z" fill="currentColor" stroke="none"/>'),
+  camera: svg('<path d="M4.5 8h2.8l1.7-2.5h6L16.7 8h2.8A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-8A1.5 1.5 0 0 1 4.5 8z"/>' + hexPath(12, 13.3, 3.4)),
+  help: svg(hexPath(12, 12, 9) + '<path d="M9.7 9.6a2.4 2.4 0 1 1 3.2 2.25c-.6.25-.9.7-.9 1.35v.5M12 16.6h.01"/>'),
+  open: svg('<path d="M10.5 5h-4A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5v-4M14 5h5v5M19 5l-7.5 7.5"/>'),
+  archive: svg('<path d="M4 14h4.5l1.5 2.5h4l1.5-2.5H20M4 14l2.2-8h11.6L20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM12 7v5.5M9.6 10.2 12 12.6l2.4-2.4"/>'),
+  send: svg('<path d="M20.5 3.5 3.5 10.6l7 2.9 2.9 7zM20.5 3.5l-10 10"/>'),
+  close: svg('<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>'),
+  back: svg('<path d="M14.5 5.5 8 12l6.5 6.5"/>'),
+  plus: svg('<path d="M5 4.5h14a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-7L7.5 20.5V17H5a2 2 0 0 1-2-2V6.5a2 2 0 0 1 2-2zM12 7.6v6M9 10.6h6"/>'),
+  folder: svg('<path d="M3.5 7.5a2 2 0 0 1 2-2h3.8l2 2.5h7.2a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM3.5 11h17"/>'),
+  copy: svg('<path d="M10 8.5h8.5A1.5 1.5 0 0 1 20 10v8.5a1.5 1.5 0 0 1-1.5 1.5H10a1.5 1.5 0 0 1-1.5-1.5V10A1.5 1.5 0 0 1 10 8.5zM15.5 8.5v-3A1.5 1.5 0 0 0 14 4H5.5A1.5 1.5 0 0 0 4 5.5V14a1.5 1.5 0 0 0 1.5 1.5h3"/>'),
+  locate: svg(hexPath(12, 12, 6.5) + '<circle cx="12" cy="12" r="1.4" fill="currentColor"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22"/>'),
+  orbit: svg(hexPath(12, 12, 3.4) + '<ellipse cx="12" cy="12" rx="10" ry="4.4" transform="rotate(-24 12 12)"/><circle cx="20.6" cy="8.4" r="1.4" fill="currentColor" stroke="none"/>'),
+  sound: svg(SPEAKER + '<path d="M15.5 9.2a4 4 0 0 1 0 5.6M18.3 6.6a7.6 7.6 0 0 1 0 10.8"/>'),
+  soundOff: svg(SPEAKER + '<path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
 }
 
 const STAT_DEFS = [
@@ -1299,7 +1315,7 @@ const TEMPLATE = `
   <button class="btn icon" id="btn-next" title="Next bot waiting on you (N)">${ICON.next}</button>
   <div class="sep"></div>
   <button class="btn icon" id="btn-orbit" title="Orbit mode — sweep around the office (O)" aria-pressed="false">${ICON.orbit}</button>
-  <button class="btn icon" id="btn-planet" title="Next office style (Tab)">${ICON.sun}</button>
+  <button class="btn icon" id="btn-planet" title="Next office style (Tab)">${ICON.style}</button>
   <div class="sep"></div>
   <button class="btn icon" id="btn-sound" title="Mute (M)" aria-pressed="true">${ICON.sound}</button>
 </div>
