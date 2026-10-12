@@ -55,6 +55,9 @@ export function withErrands(list) {
         archived: false,
         hasTranscript: false,
         sizeBytes: 0,
+        // Its tokens are already in the parent's transcript; carrying them here would count
+        // them once more for every errand out.
+        usage: null,
         // Nothing to open: a subagent has no session of its own to resume.
         canOpen: false,
         ref: null,

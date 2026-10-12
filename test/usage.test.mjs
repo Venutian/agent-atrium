@@ -105,3 +105,14 @@ test('expired allowances remain unknown; older snapshots are marked stale, never
   assert.equal(allowanceWindow({ usedPercent: 34, resetsAt: now + 1000 }, now - 3600000, now).stale, true)
   assert.equal(contextRemaining(null), null)
 })
+
+test('errands never count their parent session again', async () => {
+  const { withErrands } = await import('../src/game/errands.js')
+  const usage = { known: true, inputTokens: 100, outputTokens: 50, totalTokens: 150, byModel: [{ model: 'm', inputTokens: 100, outputTokens: 50, totalTokens: 150 }] }
+  const list = withErrands([{ id: 'p', harness: 'claude-code', project: 'r', usage, subagents: [{ id: 'a', task: 'x' }, { id: 'b', task: 'y' }] }])
+  assert.equal(list.length, 3)
+  assert.ok(list.slice(1).every((t) => t.usage === null))
+  const report = usageStats(list)
+  assert.equal(report.totalTokens, 150)
+  assert.equal(report.sessions, 1)
+})
