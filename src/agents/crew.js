@@ -68,6 +68,11 @@ const CLIP = {
   phoneUp: { name: 'Idle_A', loop: false, tweak: 'phoneUp', frames: [0, 15] },
   phone: { name: 'Idle_A', loop: true, tweak: 'phone' },
   phoneDown: { name: 'Idle_A', loop: false, tweak: 'phoneDown', frames: [0, 15] },
+  // At the desk, in its chair: the same typing and phone checks with the legs folded to sit.
+  seatType: { name: 'Working_A', loop: true, tweak: 'seat' },
+  seatPhoneUp: { name: 'Idle_A', loop: false, tweak: 'seatPhoneUp', frames: [0, 15] },
+  seatPhone: { name: 'Idle_A', loop: true, tweak: 'seatPhone' },
+  seatPhoneDown: { name: 'Idle_A', loop: false, tweak: 'seatPhoneDown', frames: [0, 15] },
 }
 
 /**
@@ -79,6 +84,7 @@ const CLIP = {
  * shoulder), `offset` turns the bone by a fixed Euler on top of whatever the clip does (an
  * arm held up through an idle), and `ramp` fades that offset in over the first so many
  * seconds — or out, with a negative ramp — which is what turns a held pose into a raise.
+ * `hold` replaces the bone's motion with its first keyframe before any of that applies.
  */
 export const TWEAKS = {
   work: {
@@ -95,6 +101,16 @@ export const TWEAKS = {
 // The raise and the lower are the held pose, ramped.
 TWEAKS.phoneUp = Object.fromEntries(Object.entries(TWEAKS.phone).map(([k, v]) => [k, { ...v, ramp: 0.45 }]))
 TWEAKS.phoneDown = Object.fromEntries(Object.entries(TWEAKS.phone).map(([k, v]) => [k, { ...v, ramp: -0.45 }]))
+// Sitting: thighs level, shins down, feet flat, held still whatever the clip's legs do. Found
+// by a search over each joint for a knee straight ahead of the hip and an ankle under the knee.
+TWEAKS.seat = Object.fromEntries(['l', 'r'].flatMap((s) => [
+  [`upperleg.${s}`, { offset: [-1.276, 0, 0], hold: true }],
+  [`lowerleg.${s}`, { offset: [0.491, 0, 0], hold: true }],
+  [`foot.${s}`, { offset: [0.785, 0, 0], hold: true }],
+]))
+TWEAKS.seatPhoneUp = { ...TWEAKS.phoneUp, ...TWEAKS.seat }
+TWEAKS.seatPhone = { ...TWEAKS.phone, ...TWEAKS.seat }
+TWEAKS.seatPhoneDown = { ...TWEAKS.phoneDown, ...TWEAKS.seat }
 
 const plainName = (n) => n.replace(/[.\s_]/g, '').toLowerCase()
 
@@ -137,7 +153,8 @@ function tweakClip(clip, table, key) {
     inv0.copy(q0).invert()
     if (t.offset) off.setFromEuler(new THREE.Euler(t.offset[0], t.offset[1], t.offset[2]))
     for (let i = 0, k = 0; i < values.length; i += 4, k++) {
-      q.fromArray(values, i)
+      // `hold` pins the bone to the clip's first pose, so an offset on top is a fixed pose.
+      q.fromArray(values, t.hold ? 0 : i)
       if (t.scale !== undefined) {
         d.copy(inv0).multiply(q)
         d2.slerpQuaternions(id, d, t.scale)

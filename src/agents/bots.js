@@ -117,9 +117,9 @@ const CREW_SCALE = 0.64
 const P = {
   helmetR: 0.48,
   headUp: 0.40, // the head bone sits at the neck; the head centres above it
-  packZ: -0.27,
+  packZ: -0.34,
   packUp: 0.06,
-  lightZ: 0.26,
+  lightZ: 0.31,
   lightY: 0.05,
 }
 
@@ -913,11 +913,14 @@ export class Bots {
       }
 
       case 'at-site': {
-        if (agent.status === 'idle') {
-          // Idlers potter around their plot, and `_drift` owns their velocity outright.
-          this._drift(agent, dt, elapsed)
-        } else if (agent.status === 'working' && agent.anchor) {
+        if ((agent.status === 'working' || agent.status === 'idle') && agent.anchor) {
+          // Working is in the chair at the desk; idle is a coffee break, stood round the
+          // room's coffee corner. Both hold a spot facing something, and check a phone now
+          // and then.
           this._workRound(agent, dt, elapsed)
+        } else if (agent.status === 'idle') {
+          // No coffee corner to go to: potter around the plot, and `_drift` owns velocity.
+          this._drift(agent, dt, elapsed)
         } else {
           // Everybody else has arrived and stays: a thread that has gone quiet has sat down
           // on the floor, one that is working is at its building. Velocity is zeroed rather
@@ -1239,6 +1242,7 @@ export class Bots {
     // Give a seated worker room for ordinary separation nudges. A tiny walk/stand boundary
     // made two neighbouring workers repeatedly step back into each other's clearance.
     if (d > 0.4 && !agent.driftBlocked && agent.checkStart < 0) {
+      agent.seated = false
       this._walk(agent, to, d, dt, DRIFT_PACE)
       if (agent.blocked || agent.stuckFor > 1) {
         agent.driftBlocked = true
@@ -1247,10 +1251,22 @@ export class Bots {
       }
       return
     }
-    // Arrived: stop dead, turn to the work, and swing.
+    // Arrived: stop dead and turn to the work, or to the coffee.
     agent.vel.set(0, 0, 0)
     this._faceToward(agent, agent.anchor, dt)
-    this._settle(agent, dt)
+    if (agent.status === 'working' && d < 0.4) {
+      // Into the chair. The seat holds a sitter where it is, so separation does not shove
+      // it about, and settling onto the seat is not walking.
+      const x0 = agent.pos.x
+      const z0 = agent.pos.z
+      agent.pos.x = THREE.MathUtils.damp(x0, agent.workSpot.x, 8, dt)
+      agent.pos.z = THREE.MathUtils.damp(z0, agent.workSpot.z, 8, dt)
+      agent.corr += Math.hypot(agent.pos.x - x0, agent.pos.z - z0)
+      agent.seated = true
+    } else {
+      agent.seated = false
+      this._settle(agent, dt)
+    }
   }
 
   /**
@@ -1370,16 +1386,25 @@ export class Bots {
     // just under the line.
     const speed = agent.groundSpeed || 0
     let key
+    // A check raises the arm, holds it, and lowers it, on its own clock.
+    const check = () => {
+      const t = agent.checkT
+      return t < 0.5 ? 'phoneUp' : t > CHECK_LEN - 0.55 ? 'phoneDown' : 'phone'
+    }
     if (agent.state === 'spawning') key = 'spawn'
     else if (speed > 0.12) key = speed > WALK_SPEED * 1.25 ? 'run' : 'walk'
     else {
       switch (agent.status) {
-        case 'working':
-          // A check raises the arm, holds it, and lowers it, on its own clock.
-          if (agent.checkStart >= 0) {
-            const t = agent.checkT
-            key = t < 0.5 ? 'phoneUp' : t > CHECK_LEN - 0.55 ? 'phoneDown' : 'phone'
-          } else key = 'type'
+        case 'working': {
+          // In its chair it types, and checks its phone, sitting down.
+          const seated = agent.seated && agent.state === 'at-site' && rig.clips.seatType
+          const pose = agent.checkStart >= 0 ? check() : 'type'
+          key = seated ? `seat${pose[0].toUpperCase()}${pose.slice(1)}` : pose
+          break
+        }
+        case 'idle':
+          // On a coffee break: standing about, now and then looking at its phone.
+          key = agent.checkStart >= 0 ? check() : 'idle'
           break
         case 'waiting':
           key = 'wave'
@@ -1488,7 +1513,7 @@ export class Bots {
         setPart(child, worn, lamp, i, 0, P.lightY, P.lightZ, 0, 0, 0)
 
         // And whatever a checking bot has got out, in its left hand.
-        if (agent.checkStart >= 0 && agent.clipKey.startsWith('phone') && elapsed - agent.checkStart < CHECK_LEN) {
+        if (agent.checkStart >= 0 && /^(seatP|p)hone/.test(agent.clipKey) && elapsed - agent.checkStart < CHECK_LEN) {
           attachMatrixAt(rig, agent.frame, this.handLSlot, bone)
           worn.multiplyMatrices(root, bone)
           props.write(agent.checkProp, worn, elapsed - agent.checkStart)

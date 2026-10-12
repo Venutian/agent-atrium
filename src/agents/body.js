@@ -3,8 +3,9 @@ import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometr
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 
 /**
- * The Atrium bot's body: a hard-shell torso with a chest plate, a jointed waist, capsule
- * limbs on dark ball joints, gauntlet forearms, mitt hands and boots.
+ * The Atrium bot's body: chunky and round, like a toy — a barrel of a hard-shell torso with a
+ * chest plate, a jointed waist, stubby capsule limbs on dark ball joints, gauntlet forearms,
+ * big mitt hands and big boots.
  *
  * Every part is a rigid shell bound wholly to one bone, the way a real robot is built: the
  * joints are spheres, so a bend never stretches a panel, it rotates one shell past another.
@@ -46,51 +47,51 @@ export function bodyGeometry(joints, boneIndex) {
   const hips = J('hips'), spine = J('spine'), chest = J('chest'), head = J('head')
 
   // Pelvis and belt.
-  add(new RoundedBoxGeometry(0.48, 0.2, 0.34, 3, 0.08).translate(0, (hips.y + spine.y) / 2, 0), 'hips', SHELL)
-  add(new THREE.CylinderGeometry(0.205, 0.205, 0.05, 18).scale(1.18, 1, 0.86).translate(0, spine.y - 0.03, 0), 'hips', JOINT)
+  add(new RoundedBoxGeometry(0.56, 0.24, 0.42, 4, 0.11).translate(0, (hips.y + spine.y) / 2, 0), 'hips', SHELL)
+  add(new THREE.CylinderGeometry(0.24, 0.24, 0.06, 20).scale(1.18, 1, 0.88).translate(0, spine.y - 0.03, 0), 'hips', JOINT)
 
   // The waist: a dark flexible core with one ridge, so the torso visibly sits on a joint.
   const waistY = spine.y + 0.08
-  add(new THREE.CylinderGeometry(0.17, 0.19, 0.17, 16).translate(0, waistY, 0), 'spine', JOINT)
-  add(new THREE.TorusGeometry(0.18, 0.022, 6, 18).rotateX(Math.PI / 2).translate(0, waistY, 0), 'spine', GEAR)
+  add(new THREE.CylinderGeometry(0.2, 0.22, 0.17, 18).translate(0, waistY, 0), 'spine', JOINT)
+  add(new THREE.TorusGeometry(0.215, 0.026, 6, 20).rotateX(Math.PI / 2).translate(0, waistY, 0), 'spine', GEAR)
 
   // The torso: a tapered hard shell, broad at the shoulders, with a chest plate the status
   // lamp sits on and a neck collar for the monitor head.
   const torsoH = (head.y - 0.02) - (chest.y - 0.24)
   const torsoY = (head.y - 0.02 + chest.y - 0.24) / 2
-  const torso = new RoundedBoxGeometry(0.64, torsoH, 0.42, 4, 0.13)
-  taper(torso, torsoH, 0.78, 0.86)
+  const torso = new RoundedBoxGeometry(0.72, torsoH, 0.54, 5, 0.21)
+  taper(torso, torsoH, 0.86, 0.9)
   add(torso.translate(0, torsoY, -0.01), 'chest', SHELL)
-  const plate = new RoundedBoxGeometry(0.36, 0.24, 0.05, 2, 0.04).translate(0, chest.y + 0.05, 0.19)
+  const plate = new RoundedBoxGeometry(0.4, 0.27, 0.06, 3, 0.06).translate(0, chest.y + 0.05, 0.24)
   add(plate, 'chest', PLATE)
-  add(new THREE.CylinderGeometry(0.1, 0.12, 0.1, 14).translate(0, head.y + 0.02, 0), 'chest', JOINT)
+  add(new THREE.CylinderGeometry(0.12, 0.14, 0.1, 16).translate(0, head.y + 0.02, 0), 'chest', JOINT)
 
   for (const s of ['l', 'r']) {
     const side = Math.sign(J(`upperarm.${s}`).x) || 1
     const shoulder = J(`upperarm.${s}`), elbow = J(`lowerarm.${s}`), wrist = J(`wrist.${s}`), hand = J(`hand.${s}`)
 
     // Shoulder: a dark ball under a rounded pauldron in the suit colour.
-    add(sphere(0.085).translate(shoulder.x, shoulder.y, shoulder.z), `upperarm.${s}`, JOINT)
-    add(sphere(0.125, 0.55).scale(1.05, 0.9, 1).translate(shoulder.x + side * 0.03, shoulder.y + 0.02, shoulder.z), `upperarm.${s}`, SHELL)
-    add(limb(shoulder, elbow, 0.072, 0.068, 0.11, 0.05), `upperarm.${s}`, SHELL)
-    add(sphere(0.066).translate(elbow.x, elbow.y, elbow.z), `lowerarm.${s}`, JOINT)
+    add(sphere(0.105).translate(shoulder.x + side * 0.04, shoulder.y, shoulder.z), `upperarm.${s}`, JOINT)
+    add(sphere(0.165, 0.6).scale(1.05, 0.92, 1).translate(shoulder.x + side * 0.08, shoulder.y + 0.03, shoulder.z), `upperarm.${s}`, SHELL)
+    add(limb(shoulder, elbow, 0.095, 0.09, 0.14, 0.05), `upperarm.${s}`, SHELL)
+    add(sphere(0.09).translate(elbow.x, elbow.y, elbow.z), `lowerarm.${s}`, JOINT)
     // The forearm flares into a gauntlet with a dark cuff ring at the wrist.
-    add(limb(elbow, wrist, 0.064, 0.088, 0.05, 0.015), `lowerarm.${s}`, SHELL)
-    add(ring(elbow, wrist, 0.09, 0.02, 0.93), `lowerarm.${s}`, JOINT)
-    // A mitt: a rounded block with a thumb, which reads as a hand from any distance.
-    add(new RoundedBoxGeometry(0.15, 0.1, 0.13, 2, 0.04).translate(hand.x + side * 0.03, hand.y, hand.z + 0.005), `hand.${s}`, GEAR)
-    add(new RoundedBoxGeometry(0.06, 0.05, 0.05, 2, 0.02).translate(hand.x - side * 0.01, hand.y - 0.015, hand.z + 0.08), `hand.${s}`, GEAR)
+    add(limb(elbow, wrist, 0.088, 0.118, 0.05, 0.02), `lowerarm.${s}`, SHELL)
+    add(ring(elbow, wrist, 0.12, 0.026, 0.93), `lowerarm.${s}`, JOINT)
+    // A big round mitt with a thumb, which reads as a hand from any distance.
+    add(new RoundedBoxGeometry(0.2, 0.15, 0.18, 3, 0.07).translate(hand.x + side * 0.04, hand.y, hand.z + 0.005), `hand.${s}`, GEAR)
+    add(new RoundedBoxGeometry(0.08, 0.07, 0.07, 2, 0.03).translate(hand.x - side * 0.005, hand.y - 0.02, hand.z + 0.1), `hand.${s}`, GEAR)
 
     const hip = J(`upperleg.${s}`), knee = J(`lowerleg.${s}`), ankle = J(`foot.${s}`), toes = J(`toes.${s}`)
-    add(sphere(0.085).translate(hip.x, hip.y - 0.02, hip.z), `upperleg.${s}`, JOINT)
-    add(limb(hip, knee, 0.082, 0.074, 0.05, 0.04), `upperleg.${s}`, SHELL)
-    add(sphere(0.072).translate(knee.x, knee.y, knee.z + 0.005), `lowerleg.${s}`, JOINT)
+    add(sphere(0.11).translate(hip.x, hip.y - 0.03, hip.z), `upperleg.${s}`, JOINT)
+    add(limb(hip, knee, 0.11, 0.1, 0.05, 0.04), `upperleg.${s}`, SHELL)
+    add(sphere(0.095).translate(knee.x, knee.y, knee.z + 0.005), `lowerleg.${s}`, JOINT)
     // A knee guard on the front of the shin, then the shin itself widening into the boot.
-    add(new RoundedBoxGeometry(0.11, 0.09, 0.05, 2, 0.02).translate(knee.x, knee.y - 0.01, knee.z + 0.07), `lowerleg.${s}`, PLATE)
-    add(limb(knee, ankle, 0.07, 0.085, 0.04, 0.02), `lowerleg.${s}`, SHELL)
+    add(new RoundedBoxGeometry(0.15, 0.11, 0.06, 2, 0.03).translate(knee.x, knee.y - 0.01, knee.z + 0.095), `lowerleg.${s}`, PLATE)
+    add(limb(knee, ankle, 0.095, 0.115, 0.04, 0.02), `lowerleg.${s}`, SHELL)
     // The boot: heel and arch on the foot bone, the toe cap on the toes so it bends.
-    add(new RoundedBoxGeometry(0.17, 0.13, 0.22, 2, 0.045).translate(ankle.x, 0.065, ankle.z + 0.02), `foot.${s}`, GEAR)
-    add(new RoundedBoxGeometry(0.17, 0.09, 0.11, 2, 0.04).translate(toes.x, 0.045, toes.z + 0.06), `toes.${s}`, GEAR)
+    add(new RoundedBoxGeometry(0.24, 0.16, 0.27, 3, 0.07).translate(ankle.x, 0.08, ankle.z + 0.02), `foot.${s}`, GEAR)
+    add(new RoundedBoxGeometry(0.24, 0.12, 0.14, 3, 0.055).translate(toes.x, 0.06, toes.z + 0.07), `toes.${s}`, GEAR)
   }
 
   const merged = mergeGeometries(parts, false)

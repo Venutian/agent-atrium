@@ -4,10 +4,10 @@ import { mulberry } from './offices.js'
 import { withCurve } from '../core/curve.js'
 
 /**
- * Workstations — one per thread, the desk its bot works at.
+ * Workstations — one per thread, the desk its bot works at, sitting down.
  *
  * Every desk is seeded from the thread's own id, so a session always gets the same setup:
- * a standing desk with one, two or three monitors, a laptop rig, a server tower or a little
+ * a sitting desk and its chair, with one, two or three monitors, a laptop rig, a server tower or a little
  * whiteboard beside it. The whole station is one merged, vertex-coloured geometry and one
  * draw call, like the buildings it replaced, and keeps their contract — `footprint`,
  * `height`, `setProgress` and a `uProgress` uniform — so construction, drone deliveries and
@@ -18,7 +18,8 @@ import { withCurve } from '../core/curve.js'
  * you, a stalled red when it hit an error, gold when its work shipped, and a dim screensaver
  * while it idles. `setStatus` is one uniform write.
  *
- * Authored facing +Z: the bot stands at `stand` in front of the desk, looking at the screens.
+ * Authored facing +Z: the bot sits at `stand` in front of the desk, looking at the screens,
+ * and stands at `behind`, clear of the chair, whenever it is not working.
  */
 
 /** Shared by every desk, so the office's clock and lighting are one uniform write each. */
@@ -32,12 +33,17 @@ const PLAIN = 0
 const SCREEN = 1
 const GLOW = 2
 
-const DESK_TOP = 0.92
+/** Sitting height for a bot: its hands rest at the keyboard from the chair. */
+const DESK_TOP = 0.64
 const DESK_W = 1.6
 const DESK_D = 0.72
 
-/** How far in front of the desk's centre its bot stands while it works. */
-export const DESK_STAND = 1.02
+/** How far in front of the desk's centre its bot sits while it works. */
+export const DESK_STAND = 0.8
+/** Where it stands when it is at its desk but not working: just behind the chair. */
+export const DESK_BEHIND = 1.45
+/** The chair's seat, at the height a seated bot's thighs rest. */
+const SEAT_TOP = 0.23
 
 const STATUS_SCREEN = {
   working: { color: [0.35, 1.0, 0.55], live: 1 },
@@ -123,8 +129,19 @@ function desk(p, rand, accent, { width = DESK_W } = {}) {
     p.box(0.08, 0.03, DESK_D - 0.08, accent, sx * (width / 2 - 0.12), 0.015, 0)
   }
   p.box(width - 0.3, 0.06, 0.12, 0x5b616b, 0, DESK_TOP - 0.12, -DESK_D / 2 + 0.1)
-  p.box(0.48, 0.025, 0.15, 0x2e333b, -0.05, DESK_TOP + 0.012, DESK_D / 2 - 0.16)
-  p.box(0.08, 0.02, 0.11, 0x2e333b, 0.32, DESK_TOP + 0.01, DESK_D / 2 - 0.16)
+  p.box(0.48, 0.025, 0.15, 0x2e333b, -0.05, DESK_TOP + 0.012, DESK_D / 2 - 0.12)
+  p.box(0.08, 0.02, 0.11, 0x2e333b, 0.32, DESK_TOP + 0.01, DESK_D / 2 - 0.12)
+  chair(p, accent)
+}
+
+/** A swivel chair, seat under where the bot sits and its back toward you. */
+function chair(p, accent) {
+  const z = DESK_STAND + 0.04
+  p.cyl(0.26, 0.26, 0.03, 0x2e333b, 0, 0.03, z, 5)
+  p.cyl(0.035, 0.035, SEAT_TOP - 0.08, 0x8b929c, 0, (SEAT_TOP - 0.08) / 2 + 0.04, z)
+  p.box(0.46, 0.07, 0.42, 0x3a3f48, 0, SEAT_TOP - 0.035, z)
+  p.box(0.44, 0.38, 0.06, accent, 0, SEAT_TOP + 0.24, z + 0.24, { rx: -0.12 })
+  p.box(0.05, 0.22, 0.05, 0x8b929c, 0, SEAT_TOP + 0.06, z + 0.22)
 }
 
 function mug(p, x, z, color) {
@@ -344,7 +361,10 @@ export function createWorkstation({ seed = 1, accent = 0xc96442, kind = null } =
   // Where its bot stands, and the circle it actually blocks: the desk and anything beside it,
   // pulled back so the spot in front stays free to stand in.
   mesh.userData.stand = DESK_STAND
-  mesh.userData.obstacle = { back: 0.15, r: Math.min(footprint, 1.05) * 0.75 }
+  mesh.userData.behind = DESK_BEHIND
+  // The desk blocks a circle pulled back behind it, clear of the chair in front: the seat is
+  // its bot's to walk into.
+  mesh.userData.obstacle = { back: 0.35, r: 0.7 }
   mesh.userData.setProgress = (v) => {
     const t = THREE.MathUtils.clamp(v, 0, 1)
     mesh.userData.progress = t

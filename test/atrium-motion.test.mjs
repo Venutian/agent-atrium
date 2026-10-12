@@ -55,11 +55,11 @@ test('hex deck containment includes the prop width, not just its centre', () => 
   plot.localCenters = [{ x: 0, z: 0 }]
   plot.center = { x: 20, z: -10 }
   assert.equal(plot.containsWorld(20, -10), true)
-  assert.equal(plot.containsLocal(0, 6.4), true)
-  assert.equal(plot.containsLocal(0, 6.4, 0.4), false)
+  assert.equal(plot.containsLocal(0, 7.0), true)
+  assert.equal(plot.containsLocal(0, 7.0, 0.4), false)
   for (let i = 0; i < 6; i++) {
     const a = Math.PI / 6 + i * Math.PI / 3
-    assert.ok(plot.containsLocal(Math.cos(a) * 7.6 * 0.992 * 0.58, Math.sin(a) * 7.6 * 0.992 * 0.58, 2))
+    assert.ok(plot.containsLocal(Math.cos(a) * 8.4 * 0.992 * 0.58, Math.sin(a) * 8.4 * 0.992 * 0.58, 2))
   }
 })
 
