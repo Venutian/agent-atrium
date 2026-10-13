@@ -273,6 +273,11 @@ async function awaitingReply(file) {
     if (r.type === 'user') return false
     if (r.type !== 'assistant') continue
     const content = r.message?.content
+    // Each content block of a reply is written as a record of its own as it streams, so a reply
+    // that thinks first lands its thinking alone, minutes before the text or tool call it is
+    // working towards. No turn ends on thinking. Replayed against 129 real subagent transcripts,
+    // reading that record as the turn handed back hid working errands for a fifth of their run.
+    if (Array.isArray(content) && content.length && content.every((c) => c?.type === 'thinking' || c?.type === 'redacted_thinking')) return false
     const calling = Array.isArray(content) && content.some((c) => c?.type === 'tool_use')
     return !calling && r.message?.stop_reason !== 'tool_use'
   }
@@ -321,11 +326,25 @@ async function scanLiveSessions() {
 /** Briefs, kept until the file changes — the mtime cache `transcriptMeta` establishes. */
 const subagentCache = new Map()
 
-/** The prompt a parent handed its subagent, which is the only thing about an errand worth showing. */
+/**
+ * What a parent sent its subagent to do. The few-word `description` the parent gave the call,
+ * kept beside the transcript in `agent-<id>.meta.json`, when there is one — a brief runs to
+ * kilobytes and opens however its author felt like opening it — and the brief itself otherwise.
+ */
 async function subagentTask(file, mtime) {
   const cached = subagentCache.get(file)
   if (cached && cached.mtime === mtime) return cached.task
   let task = ''
+  try {
+    const meta = JSON.parse(await fsp.readFile(file.replace(/\.jsonl$/, '.meta.json'), 'utf8'))
+    if (typeof meta?.description === 'string') task = cleanPrompt(meta.description)
+  } catch {
+    /* older CLIs write no meta file */
+  }
+  if (task) {
+    subagentCache.set(file, { mtime, task })
+    return task
+  }
   // Not simply the first record, and sometimes not there at all: a forked subagent opens with a
   // `fork-context-ref` and inherits its parent's context instead of being briefed, so it has no
   // task text to find. Same test `readTranscriptMeta` puts to a thread's first prompt.
