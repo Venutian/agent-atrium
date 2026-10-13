@@ -266,6 +266,56 @@ test('a subagent that has handed its answer back is finished, however recently i
   await fsp.rm(home, { recursive: true, force: true })
 })
 
+test('a subagent caught mid-thought is still working, not finished', async () => {
+  // A reply streams one content block per record, so its thinking lands alone before the call.
+  const home = await fakeClaudeWithErrands([
+    { type: 'user', message: { content: 'check the logs' } },
+    { type: 'assistant', message: { content: [{ type: 'thinking', thinking: '…' }], stop_reason: null } },
+  ])
+  const h = await claudeWithErrands(home)
+  const [thread] = await h.scanThreads()
+  assert.equal(thread.subagents?.length, 1)
+  await fsp.rm(home, { recursive: true, force: true })
+})
+
+test('a subagent is labelled with the short description its parent gave, when there is one', async () => {
+  const home = await fakeClaudeWithErrands([{ type: 'user', message: { content: `You are implementing ${'x'.repeat(500)}` } }, midTurn])
+  const dir = path.join(home, '.claude', 'projects', '-tmp-demo', '11111111-2222-4333-8444-555555555555', 'subagents')
+  await fsp.writeFile(path.join(dir, 'agent-abc.meta.json'), JSON.stringify({ agentType: 'general-purpose', description: 'Implement Task 2' }))
+  const h = await claudeWithErrands(home)
+  const [thread] = await h.scanThreads()
+  assert.equal(thread.subagents?.[0].task, 'Implement Task 2')
+  await fsp.rm(home, { recursive: true, force: true })
+})
+
+test('a Codex thread spawned by a task is an errand of the thread at the top of its chain', async () => {
+  const { DatabaseSync } = await import('node:sqlite')
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'codex-errands-'))
+  const [root, lead, worker, done, guardian] = Array.from({ length: 5 }, (_, i) => `019cc762-45a2-7112-89cd-cd345c17e83${i}`)
+  const spawned = (parent, nickname, agentPath) => JSON.stringify({ subagent: { thread_spawn: { parent_thread_id: parent, depth: 1, agent_path: agentPath, agent_nickname: nickname } } })
+  const db = new DatabaseSync(path.join(home, 'state_5.sqlite'))
+  db.exec('CREATE TABLE threads (id TEXT, cwd TEXT, title TEXT, source TEXT, thread_source TEXT, agent_nickname TEXT, agent_path TEXT); CREATE TABLE thread_spawn_edges (parent_thread_id TEXT, child_thread_id TEXT, status TEXT)')
+  const ins = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)')
+  ins.run(root, '/tmp/demo', 'Ship the art pass', 'vscode', 'user', null, null)
+  ins.run(lead, '/tmp/demo', '', spawned(root, 'Linnaeus', '/root/production'), 'subagent', 'Linnaeus', '/root/production')
+  ins.run(worker, '/tmp/demo', '', spawned(lead, 'Gauss', '/root/production/b308v3'), 'subagent', 'Gauss', '/root/production/b308v3')
+  ins.run(done, '/tmp/demo', '', spawned(lead, 'Dewey', '/root/production/b308v2'), 'subagent', 'Dewey', '/root/production/b308v2')
+  ins.run(guardian, '/tmp/demo', 'Reviewer', '{"subagent":{"other":"guardian"}}', null, null, null)
+  for (const [p, c] of [[root, lead], [lead, worker], [lead, done]]) db.prepare("INSERT INTO thread_spawn_edges VALUES (?, ?, 'open')").run(p, c)
+  db.close()
+  const day = path.join(home, 'sessions', '2026', '10', '13')
+  await fsp.mkdir(day, { recursive: true })
+  for (const id of [root, lead, worker, done, guardian]) {
+    const status = id === done || id === root ? 'task_complete' : 'task_started'
+    await fsp.writeFile(path.join(day, `rollout-${id}.jsonl`), [line('session_meta', { id, cwd: '/tmp/demo' }), line('event_msg', { type: status })].join('\n') + '\n')
+  }
+  const h = await scanWith(home)
+  const threads = await h.scanThreads()
+  assert.deepEqual(threads.map((t) => t.id), [`codex:${root}`], 'spawned and guardian threads are not threads of their own')
+  assert.deepEqual(threads[0].subagents.map((s) => [s.id, s.task]).sort(), [[lead, 'Linnaeus · production'], [worker, 'Gauss · b308v3']])
+  await fsp.rm(home, { recursive: true, force: true })
+})
+
 // ── shared helpers ────────────────────────────────────────────────────────────
 
 test('readTail drops the partial line it lands in the middle of', async () => {

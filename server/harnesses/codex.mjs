@@ -112,14 +112,15 @@ async function databaseRows() {
     const columns = new Set(db.prepare('PRAGMA table_info(threads)').all().map((r) => r.name))
     if (!['id', 'cwd'].every((n) => columns.has(n))) return new Map()
 
-    // Threads a task spawned are not conversations anybody had; each would stand on the map as
-    // a bot nobody talks to.
-    const children = new Set()
+    // Threads a task spawned are not conversations anybody had, so none is a thread of its own —
+    // each is an errand of the thread that sent it, keyed child → parent.
+    const children = new Map()
     if (tables.has('thread_spawn_edges')) {
       const edge = new Set(db.prepare('PRAGMA table_info(thread_spawn_edges)').all().map((r) => r.name))
       if (edge.has('child_thread_id')) {
-        for (const r of db.prepare('SELECT child_thread_id FROM thread_spawn_edges').all()) {
-          if (typeof r.child_thread_id === 'string') children.add(r.child_thread_id)
+        const parent = edge.has('parent_thread_id') ? 'parent_thread_id' : "''"
+        for (const r of db.prepare(`SELECT child_thread_id, ${parent} AS parent FROM thread_spawn_edges`).all()) {
+          if (typeof r.child_thread_id === 'string') children.set(r.child_thread_id, typeof r.parent === 'string' ? r.parent : '')
         }
       }
     }
@@ -139,6 +140,8 @@ async function databaseRows() {
           ${column(columns, 'model')} AS model,
           ${column(columns, 'reasoning_effort')} AS reasoning_effort,
           ${column(columns, 'rollout_path')} AS rollout_path,
+          ${column(columns, 'agent_nickname')} AS agent_nickname,
+          ${column(columns, 'agent_path')} AS agent_path,
           ${column(columns, 'archived', '0')} AS archived,
           ${timeExpr(columns, 'created_at_ms', 'created_at')} AS created_at_ms,
           ${timeExpr(columns, 'updated_at_ms', 'updated_at')} AS updated_at_ms
@@ -147,8 +150,12 @@ async function databaseRows() {
       .all()
       .filter((r) => UUID.test(r.id || ''))
 
-    // Keep excluded ids in the join so their rollouts cannot resurrect them.
-    for (const r of rows) r.excluded = children.has(r.id) || internalSource(r.source) || internalSource(r.thread_source)
+    // Keep excluded ids and errands in the join so their rollouts cannot resurrect them as threads.
+    for (const r of rows) {
+      r.child = children.has(r.id) || Boolean(spawnParent(r.source))
+      r.parent = children.get(r.id) || spawnParent(r.source)
+      r.excluded = !r.child && (internalSource(r.source) || internalSource(r.thread_source))
+    }
 
     return new Map(rows.map((r) => [r.id, r]))
   } catch {
@@ -206,6 +213,18 @@ function internalSource(source) {
   return /subagent|approval[_-]?review|exec[_-]?review|safety[_-]?review/i.test(source)
 }
 
+/**
+ * The thread that spawned this one, when its source says it was spawned. A guardian or review
+ * source is a subagent too, but nobody sent it on an errand, so it has no parent here.
+ */
+function spawnParent(source) {
+  if (typeof source === 'string') {
+    try { source = JSON.parse(source) } catch { return '' }
+  }
+  const parent = source?.subagent?.thread_spawn?.parent_thread_id
+  return typeof parent === 'string' ? parent : ''
+}
+
 const contextOnly = (text) => /^<(?:environment_context|external_codex_apps_open_page)>/.test(text)
 
 function contentText(content) {
@@ -216,12 +235,16 @@ function contentText(content) {
 
 /** What the head of a transcript knows about itself, for a session the database has not indexed. */
 function readHeadMeta(records) {
-  const meta = { cwd: '', gitBranch: '', model: '', effort: '', createdAt: 0, prompt: '', excluded: false, source: '' }
+  const meta = { cwd: '', gitBranch: '', model: '', effort: '', createdAt: 0, prompt: '', excluded: false, source: '', parent: '', nickname: '', agentPath: '' }
   for (const r of records) {
     const p = r?.payload
     if (!p || typeof p !== 'object') continue
     if (r.type === 'session_meta') {
-      meta.excluded ||= internalSource(p.source) || internalSource(p.originator) || Boolean(p.parent_thread_id)
+      const parent = (typeof p.parent_thread_id === 'string' && p.parent_thread_id) || spawnParent(p.source)
+      if (parent) meta.parent ||= parent
+      else meta.excluded ||= internalSource(p.source) || internalSource(p.originator)
+      meta.nickname ||= typeof p.agent_nickname === 'string' ? p.agent_nickname : ''
+      meta.agentPath ||= typeof p.agent_path === 'string' ? p.agent_path : ''
       meta.cwd ||= p.cwd || ''
       if (p.source === 'vscode' || /vscode|codex_vscode/i.test(p.originator || '')) meta.source = 'vscode'
       meta.gitBranch ||= p.git?.branch || ''
@@ -289,15 +312,34 @@ async function scanThreads() {
   const now = Date.now()
   const out = []
   const projects = new Map()
+  // Spawned threads still working, and who spawned each — filled in this pass, handed to their
+  // root threads after it.
+  const errands = []
+  const parentOf = new Map()
+  for (const [id, row] of rows) if (row.parent) parentOf.set(id, row.parent)
 
   for (const id of ids) {
     const row = rows.get(id)
     if (row?.excluded) continue
     const entry = rollouts.get(id)
+    // A spawned thread with no recent write cannot be mid-errand, and there are hundreds of
+    // them, so the transcript is only read for one that might be.
+    if (row?.child && (!entry || now - entry.mtime >= ACTIVE_WINDOW_MS)) continue
     // Even indexed rollouts can carry helper metadata absent from older schemas.
     const facts = entry ? await transcriptFacts(entry, true) : { lifecycle: null, meta: null }
     const meta = facts.meta || {}
     if (meta.excluded) continue
+    if (row?.child || meta.parent) {
+      if (meta.parent && !parentOf.has(id)) parentOf.set(id, meta.parent)
+      const lastActivityAt = Math.max(num(row?.updated_at_ms), entry?.mtime || 0)
+      if (facts.lifecycle?.type !== 'task_started' || now - lastActivityAt >= ACTIVE_WINDOW_MS) continue
+      // Codex encrypts the brief a parent sends, so what a spawned thread is called — its
+      // nickname and the task name at the end of its agent path — is all there is to show.
+      const nickname = clean(row?.agent_nickname || meta.nickname)
+      const task = clean(row?.title || row?.name || meta.prompt) || path.posix.basename(clean(row?.agent_path || meta.agentPath))
+      errands.push({ id, sub: { id, task: [nickname, task].filter(Boolean).join(' · '), lastActivityAt } })
+      continue
+    }
 
     const cwd = plainPath(row?.cwd || meta.cwd || '')
     if (!projects.has(cwd)) projects.set(cwd, await projectOf(cwd))
@@ -341,6 +383,16 @@ async function scanThreads() {
       canOpen: true,
       ref: { sessionId: id, cwd, source: row?.source === 'vscode' || meta.source === 'vscode' ? 'vscode' : 'cli' },
     })
+  }
+
+  // A spawned thread can spawn its own, so each errand is walked up to the thread on the map at
+  // the top of its chain rather than to whoever sent it directly — that one is an errand too.
+  const byId = new Map(out.map((t) => [t.id, t]))
+  for (const { id, sub } of errands) {
+    let root = parentOf.get(id)
+    for (let hop = 0; root && !byId.has(ID(root)) && hop < 16; hop++) root = parentOf.get(root)
+    const thread = root && byId.get(ID(root))
+    if (thread) (thread.subagents ||= []).push(sub)
   }
   return out
 }

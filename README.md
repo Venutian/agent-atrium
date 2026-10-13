@@ -305,8 +305,8 @@ grid. The layout is remembered.
 
 | Agent | Notes |
 | --- | --- |
-| **Claude Code** | Desktop app, CLI and the VS Code extension, including worktrees |
-| **Codex** | Desktop app, CLI and the VS Code extension. Its own helper and review threads are left out |
+| **Claude Code** | Desktop app, CLI and the VS Code extension, including worktrees. Running subagents join their parent as bots |
+| **Codex** | Desktop app, CLI and the VS Code extension. Running subagents join their parent as bots; review threads are left out |
 | **VS Code chat** | The built-in chat, including custom and local models |
 | **Cursor** | Agent transcripts |
 | **OpenCode** | Top-level sessions |
