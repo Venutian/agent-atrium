@@ -45,7 +45,7 @@ function paperclip({ calls = [] } = {}) {
     if (path === '/companies/co/chats') return json([{ id: 'chat', conversationAgentId: BOT, lastActivityAt: '2026-11-02T10:00:00Z' }])
     if (path === `/agents/${BOT}`) return json(agents[2])
     if (path === `/companies/co/chats/${BOT}`) return json({ id: 'chat', conversationState: 'active' })
-    if (path === '/issues/chat/comments?limit=100') {
+    if (path.startsWith('/issues/chat/comments?limit=')) {
       return json([
         { id: 'm3', authorType: 'system', body: 'Run retried' },
         { id: 'm2', authorType: 'agent', authorAgentId: BOT, body: 'On it' },
@@ -185,7 +185,11 @@ test('the chat list shows who can be talked to and leaves configuration out', as
   await withDoor(async (ask) => {
     const { body } = await ask('/v1/chats')
     assert.deepEqual(body.bots.map((b) => b.name), ['Tony', 'Scout', 'Critic'])
-    assert.equal(body.bots.find((b) => b.name === 'Critic').lastActiveAt, '2026-11-02T10:00:00Z')
+    const critic = body.bots.find((b) => b.name === 'Critic')
+    assert.equal(critic.lastActiveAt, '2026-11-02T10:00:00Z')
+    assert.equal(critic.lastMessage.text, 'On it')
+    assert.equal(critic.lastMessage.mine, false)
+    assert.equal(body.bots.find((b) => b.name === 'Tony').lastMessage, null)
     assert.equal(JSON.stringify(body).includes('/secret'), false)
   })
 })

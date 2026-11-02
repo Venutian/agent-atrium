@@ -21,6 +21,8 @@ const QUEUED = new Set(['backlog', 'todo'])
 const FINISHED = new Set(['done', 'cancelled'])
 const SHOWN_DONE = 10
 const SHOWN_MESSAGES = 100
+const PREVIEW_LOOKBACK = 5
+const PREVIEW_CHARS = 140
 
 export class PaperclipError extends Error {
   constructor(status, message) {
@@ -150,6 +152,14 @@ export async function jobDetail(jobId, options) {
   }
 }
 
+/** The newest thing a person or a bot said, for the chat list. System notes do not count. */
+async function lastSaid(chat, options) {
+  if (!chat) return null
+  const comments = await call(`/issues/${chat.id}/comments?limit=${PREVIEW_LOOKBACK}`, options)
+  const said = comments.find((c) => c.authorType !== 'system')
+  return said ? { text: (said.body || '').slice(0, PREVIEW_CHARS), mine: said.authorType === 'user', at: said.createdAt } : null
+}
+
 /** Everyone you can talk to, with whether a conversation has started. */
 export async function chatList(options) {
   const id = await companyId(options)
@@ -160,9 +170,13 @@ export async function chatList(options) {
   ])
   const liveAgents = new Set(live.map((run) => run.agentId))
   const started = new Map(chats.map((chat) => [chat.conversationAgentId, chat]))
-  return agents.map((agent) => ({
-    ...botView(agent, liveAgents),
-    lastActiveAt: started.get(agent.id)?.lastActivityAt || started.get(agent.id)?.updatedAt || null,
+  return Promise.all(agents.map(async (agent) => {
+    const chat = started.get(agent.id)
+    return {
+      ...botView(agent, liveAgents),
+      lastActiveAt: chat?.lastActivityAt || chat?.updatedAt || null,
+      lastMessage: await lastSaid(chat, options),
+    }
   }))
 }
 
