@@ -333,8 +333,9 @@ Every agent that is installed shows up at once. To add a new one in code, see
 ## The phone door
 
 If you run [Paperclip](https://github.com/paperclipai/paperclip) on this machine, a phone app can
-add jobs, read their updates and answer approvals through a small separate server. It is off
-until you start it, and it needs a token of at least 32 characters:
+add jobs, read their updates, answer approvals and bots' questions, stop a run, cancel or reopen a
+job and pause a bot through a small separate server. It is off until you start it, and it needs a
+token of at least 32 characters:
 
 ```bash
 AGENT_ATRIUM_PHONE_TOKEN="$(openssl rand -hex 32)" AGENT_ATRIUM_PHONE_HOST=0.0.0.0 npm run phone
