@@ -34,8 +34,8 @@ refuses any request with an Origin header, because the app sends none and browse
 Paperclip itself stays on loopback: this door is the only thing that talks to it from outside.
 
 The token comes from the environment, because `data/atrium.json` is the only file this project
-writes. Adding a job, a comment or an approval decision are the only writes, each one a person
-asking by name, and they go to Paperclip's API rather than to any harness's store.
+writes. Adding a job, a comment, an approval decision or a chat message are the only writes, each
+one a person asking by name, and they go to Paperclip's API rather than to any harness's store.
 
 ## Nothing is read from or executed inside another application's bundle
 

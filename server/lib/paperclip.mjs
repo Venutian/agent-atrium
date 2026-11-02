@@ -3,7 +3,8 @@
  *
  * Paperclip is a service with a public API, not a harness with a store, so "Agent Atrium never
  * writes to a harness" is not in question here: nothing on disk is touched, and the only writes
- * are the three a person asks for by name (add a job, comment on one, decide an approval).
+ * are the ones a person asks for by name (add a job, comment on one, decide an approval, or say
+ * something to a bot in chat).
  *
  * Everything here returns plain shapes the phone can render. Paperclip's own records carry
  * adapter configuration and paths, and none of that is passed on.
@@ -19,6 +20,7 @@ const RUNNING = new Set(['in_progress'])
 const QUEUED = new Set(['backlog', 'todo'])
 const FINISHED = new Set(['done', 'cancelled'])
 const SHOWN_DONE = 10
+const SHOWN_MESSAGES = 100
 
 export class PaperclipError extends Error {
   constructor(status, message) {
@@ -122,6 +124,12 @@ export async function studioSummary(options) {
   }
 }
 
+/** Who wrote a comment, as the phone should show it. */
+function authorOf(comment, names) {
+  if (comment.authorType === 'system') return 'Paperclip'
+  return comment.authorAgentId ? names.get(comment.authorAgentId) || 'A bot' : 'You'
+}
+
 export async function jobDetail(jobId, options) {
   if (!ID.test(jobId)) throw new PaperclipError(400, 'That is not a job id')
   const [issue, comments] = await Promise.all([
@@ -135,11 +143,64 @@ export async function jobDetail(jobId, options) {
     description: issue.description || '',
     comments: comments.map((c) => ({
       id: c.id,
-      from: c.authorAgentId ? names.get(c.authorAgentId) || 'A bot' : 'You',
+      from: authorOf(c, names),
       text: c.body || '',
       at: c.createdAt,
     })),
   }
+}
+
+/** Everyone you can talk to, with whether a conversation has started. */
+export async function chatList(options) {
+  const id = await companyId(options)
+  const [agents, chats, live] = await Promise.all([
+    call(`/companies/${id}/agents`, options),
+    call(`/companies/${id}/chats`, options),
+    call(`/companies/${id}/live-runs`, options),
+  ])
+  const liveAgents = new Set(live.map((run) => run.agentId))
+  const started = new Map(chats.map((chat) => [chat.conversationAgentId, chat]))
+  return agents.map((agent) => ({
+    ...botView(agent, liveAgents),
+    lastActiveAt: started.get(agent.id)?.lastActivityAt || started.get(agent.id)?.updatedAt || null,
+  }))
+}
+
+/** One conversation, oldest message first. A bot nobody has spoken to yet has an empty one. */
+export async function chatThread(botId, options) {
+  if (!ID.test(botId)) throw new PaperclipError(400, 'That is not a bot id')
+  const id = await companyId(options)
+  const [agent, chat] = await Promise.all([
+    call(`/agents/${botId}`, options),
+    call(`/companies/${id}/chats/${botId}`, options),
+  ])
+  const bot = { id: agent.id, name: agent.name, title: agent.title || '' }
+  if (!chat) return { bot, working: false, messages: [] }
+  const comments = await call(`/issues/${chat.id}/comments?limit=${SHOWN_MESSAGES}`, options)
+  const names = new Map([[agent.id, agent.name]])
+  return {
+    bot,
+    working: chat.conversationState === 'active',
+    messages: comments
+      .map((c) => ({ id: c.id, from: authorOf(c, names), mine: c.authorType === 'user', text: c.body || '', at: c.createdAt }))
+      .reverse(),
+  }
+}
+
+/**
+ * Say something to a bot. `requestId` comes from the phone, so a retry after a dropped connection
+ * cannot send the same message twice.
+ */
+export async function sendChat(botId, text, requestId, options) {
+  if (!ID.test(botId)) throw new PaperclipError(400, 'That is not a bot id')
+  if (!ID.test(requestId || '')) throw new PaperclipError(400, 'A message needs a request id')
+  const body = typeof text === 'string' ? text.trim() : ''
+  if (!body) throw new PaperclipError(400, 'Write a message first')
+  if (body.length > MAX_TEXT) throw new PaperclipError(400, `Messages are limited to ${MAX_TEXT} characters`)
+  const id = await companyId(options)
+  const chat = await call(`/companies/${id}/chats/${botId}`, { ...options, method: 'POST', body: {} })
+  const comment = await call(`/issues/${chat.id}/comments`, { ...options, method: 'POST', body: { body, clientRequestId: requestId } })
+  return { id: comment.id }
 }
 
 /** A new job goes to the top of the org chart, which decides who does it. */

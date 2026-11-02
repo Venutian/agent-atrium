@@ -12,7 +12,7 @@
 import http from 'node:http'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
-import { PaperclipError, addComment, addJob, decideApproval, jobDetail, studioSummary } from './lib/paperclip.mjs'
+import { PaperclipError, addComment, addJob, chatList, chatThread, decideApproval, jobDetail, sendChat, studioSummary } from './lib/paperclip.mjs'
 import { scanThreads } from './scan.mjs'
 
 const MIN_TOKEN = 32
@@ -96,6 +96,8 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions })
     const job = /^\/v1\/jobs\/([^/]+)$/.exec(pathname)
     const comment = /^\/v1\/jobs\/([^/]+)\/comments$/.exec(pathname)
     const decision = /^\/v1\/approvals\/([^/]+)\/(approve|reject)$/.exec(pathname)
+    const chat = /^\/v1\/chats\/([^/]+)$/.exec(pathname)
+    const chatMessage = /^\/v1\/chats\/([^/]+)\/messages$/.exec(pathname)
     try {
       if (pathname === '/v1/summary' && req.method === 'GET') {
         const [summary, live] = await Promise.all([studioSummary(options), sessions()])
@@ -112,6 +114,12 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions })
       if (decision && req.method === 'POST') {
         const body = await readBody(req)
         return send(res, 200, await decideApproval(decision[1], decision[2], body.note, options))
+      }
+      if (pathname === '/v1/chats' && req.method === 'GET') return send(res, 200, { bots: await chatList(options) })
+      if (chat && req.method === 'GET') return send(res, 200, await chatThread(chat[1], options))
+      if (chatMessage && req.method === 'POST') {
+        const body = await readBody(req)
+        return send(res, 201, await sendChat(chatMessage[1], body.text, body.requestId, options))
       }
       return send(res, 404, { error: 'Unknown endpoint' })
     } catch (err) {
