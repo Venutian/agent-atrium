@@ -12,6 +12,8 @@ const JOB = '11111111-2222-4333-8444-555555555555'
 const APPROVAL = '66666666-7777-4888-8999-000000000000'
 const BOT = '77777777-8888-4999-8aaa-111111111111'
 const REQUEST = '88888888-9999-4aaa-8bbb-222222222222'
+const PROJECT = '99999999-aaaa-4bbb-8ccc-333333333333'
+const QUESTION = 'aaaaaaaa-bbbb-4ccc-8ddd-444444444444'
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status })
 
@@ -37,6 +39,23 @@ function paperclip({ calls = [] } = {}) {
     if (path === '/companies/co/approvals?status=pending') return json([{ id: APPROVAL, type: 'hire_agent', payload: { name: 'New bot' } }])
     if (path === '/companies/co/dashboard') return json({ costs: { monthSpendCents: 321 } })
     if (path === '/companies/co/sidebar-badges') return json({ failedRuns: 1 })
+    if (path === '/companies/co/projects') return json([{ id: PROJECT, name: 'Baltis', secretPath: '/secret' }])
+    if (path === '/companies/co/attention') return json({ items: [{ sourceKind: 'issue_thread_interaction', whyNow: 'Waiting on you', subject: { title: 'Which map?', metadata: { issueId: JOB } } }] })
+    if (path === '/companies/co/costs/window-spend') return json([{ provider: 'anthropic', window: '7d', inputTokens: 100, outputTokens: 20, cachedInputTokens: 900, costCents: 0 }])
+    if (path === `/issues/${JOB}/interactions` && init.method === 'GET') {
+      return json([
+        { id: QUESTION, kind: 'ask_user_questions', status: 'pending', title: 'Which map?', payload: { questions: [{ id: 'size', prompt: 'Size?', selectionMode: 'multi', required: true, options: [{ id: 's', label: 'Small', description: 'Fast' }] }] } },
+        { id: 'c1', kind: 'request_confirmation', status: 'pending', title: 'Ship?', payload: { prompt: 'Ship it?', acceptLabel: 'Ship', rejectLabel: 'Hold' } },
+        { id: 'c2', kind: 'request_item_verdicts', status: 'pending', payload: {} },
+        { id: 'c3', kind: 'request_confirmation', status: 'answered', payload: {} },
+      ])
+    }
+    if (path === `/issues/${JOB}/live-runs`) return json([{ id: 'run1', agentId: 'bot', status: 'running' }])
+    if (path === '/heartbeat-runs/run1/cancel') return json({})
+    if (path.startsWith('/companies/co/heartbeat-runs')) return json([{ id: 'old', issueId: JOB, agentId: 'bot', status: 'failed', error: 'Tests failed' }])
+    if (path.startsWith(`/issues/${JOB}/interactions/${QUESTION}/`)) return json({})
+    if (path === `/issues/${JOB}` && init.method === 'PATCH') return json({})
+    if (path === `/agents/${BOT}/pause` || path === `/agents/${BOT}/resume`) return json({})
     if (path === '/companies/co/live-runs') return json([{ agentId: 'bot' }])
     if (path === `/issues/${JOB}`) return json({ ...issues[0], description: 'Details' })
     if (path === `/issues/${JOB}/comments` && init.method === 'POST') return json({ id: 'c2' }, 201)
@@ -135,7 +154,10 @@ test('the summary lists what needs you and leaves configuration out', async () =
     const { status, body } = await ask('/v1/summary')
     assert.equal(status, 200)
     assert.equal(body.company, 'nGen Labs')
-    assert.deepEqual(body.needsYou.map((n) => n.kind), ['approval', 'blocked', 'failed'])
+    assert.deepEqual(body.needsYou.map((n) => n.kind), ['approval', 'question', 'blocked', 'failed'])
+    assert.equal(body.needsYou[1].id, JOB)
+    assert.deepEqual(body.projects, [{ id: PROJECT, name: 'Baltis' }])
+    assert.deepEqual(body.usage, [{ provider: 'anthropic', window: '7d', tokens: 120, cachedTokens: 900 }])
     assert.deepEqual(body.running.map((j) => [j.ref, j.bot]), [['NGE-1', 'Scout']])
     assert.equal(body.bots.find((b) => b.name === 'Scout').status, 'running')
     assert.equal(body.spentCents, 321)
@@ -220,4 +242,83 @@ test('an oversized body is refused', async () => {
     const res = await ask('/v1/jobs', { method: 'POST', body: { title: 'x', description: 'y'.repeat(20 * 1024) } })
     assert.equal(res.status, 413)
   })
+})
+
+test('a job shows its questions, and only the forms the app can answer', async () => {
+  await withDoor(async (ask) => {
+    const { body } = await ask(`/v1/jobs/${JOB}`)
+    assert.deepEqual(body.questions.map((q) => q.kind), ['choice', 'confirm'])
+    assert.equal(body.questions[0].items[0].multiple, true)
+    assert.equal(body.questions[0].items[0].options[0].hint, 'Fast')
+    assert.equal(body.questions[1].accept, 'Ship')
+  })
+})
+
+test('a job says whether it is live', async () => {
+  await withDoor(async (ask) => {
+    const { body } = await ask(`/v1/jobs/${JOB}`)
+    assert.equal(body.run.live, true)
+    assert.equal(body.run.why, '')
+  })
+})
+
+test('stopping a job cancels its live runs and leaves the job open', async () => {
+  const calls = []
+  await withDoor(async (ask) => {
+    const stopped = await ask(`/v1/jobs/${JOB}/stop`, { method: 'POST', body: {} })
+    assert.equal(stopped.body.stopped, 1)
+    assert.ok(calls.some((c) => c.path === '/heartbeat-runs/run1/cancel' && c.method === 'POST'))
+    assert.equal(calls.some((c) => c.path === `/issues/${JOB}` && c.method === 'PATCH'), false)
+  }, { calls })
+})
+
+test('a job can be cancelled and reopened', async () => {
+  const calls = []
+  await withDoor(async (ask) => {
+    assert.equal((await ask(`/v1/jobs/${JOB}/cancel`, { method: 'POST', body: {} })).status, 200)
+    assert.equal((await ask(`/v1/jobs/${JOB}/reopen`, { method: 'POST', body: {} })).status, 200)
+    const sent = calls.filter((c) => c.path === `/issues/${JOB}` && c.method === 'PATCH').map((c) => c.body.status)
+    assert.deepEqual(sent, ['cancelled', 'todo'])
+  }, { calls })
+})
+
+test('a bot can be paused and resumed', async () => {
+  const calls = []
+  await withDoor(async (ask) => {
+    assert.equal((await ask(`/v1/bots/${BOT}/pause`, { method: 'POST', body: {} })).status, 200)
+    assert.equal((await ask(`/v1/bots/${BOT}/resume`, { method: 'POST', body: {} })).status, 200)
+    assert.deepEqual(calls.filter((c) => c.path.startsWith('/agents/') && c.method === 'POST').map((c) => c.path.split('/').pop()), ['pause', 'resume'])
+    assert.equal((await ask('/v1/bots/not-a-bot/pause', { method: 'POST', body: {} })).status, 400)
+    assert.equal((await ask(`/v1/bots/${BOT}/delete`, { method: 'POST', body: {} })).status, 404)
+  }, { calls })
+})
+
+test('questions are answered with only the fields Paperclip expects', async () => {
+  const calls = []
+  await withDoor(async (ask) => {
+    const path = `/v1/jobs/${JOB}/questions/${QUESTION}`
+    const answers = [{ questionId: 'size', optionIds: ['s'], extra: 'dropped' }]
+    assert.equal((await ask(`${path}/respond`, { method: 'POST', body: { answers } })).status, 200)
+    assert.deepEqual(calls.find((c) => c.path.endsWith('/respond')).body, { answers: [{ questionId: 'size', optionIds: ['s'] }] })
+    assert.equal((await ask(`${path}/respond`, { method: 'POST', body: {} })).status, 400)
+    assert.equal((await ask(`${path}/accept`, { method: 'POST', body: {} })).status, 200)
+    assert.equal((await ask(`${path}/reject`, { method: 'POST', body: { reason: 'Not yet' } })).status, 200)
+    assert.equal(calls.find((c) => c.path.endsWith('/reject')).body.reason, 'Not yet')
+    assert.equal((await ask(`/v1/jobs/${JOB}/questions/nope/accept`, { method: 'POST', body: {} })).status, 400)
+  }, { calls })
+})
+
+test('a new job can name its project, bot and priority', async () => {
+  const calls = []
+  await withDoor(async (ask) => {
+    const made = await ask('/v1/jobs', { method: 'POST', body: { title: 'Polish', projectId: PROJECT, botId: BOT, priority: 'high' } })
+    assert.equal(made.status, 201)
+    const sent = calls.find((c) => c.path === '/companies/co/issues' && c.method === 'POST').body
+    assert.equal(sent.projectId, PROJECT)
+    assert.equal(sent.assigneeAgentId, BOT)
+    assert.equal(sent.priority, 'high')
+    assert.equal((await ask('/v1/jobs', { method: 'POST', body: { title: 'x', projectId: QUESTION } })).status, 400)
+    assert.equal((await ask('/v1/jobs', { method: 'POST', body: { title: 'x', botId: QUESTION } })).status, 400)
+    assert.equal((await ask('/v1/jobs', { method: 'POST', body: { title: 'x', priority: 'urgent' } })).status, 400)
+  }, { calls })
 })

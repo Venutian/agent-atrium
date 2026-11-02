@@ -23,6 +23,10 @@ const SHOWN_DONE = 10
 const SHOWN_MESSAGES = 100
 const PREVIEW_LOOKBACK = 5
 const PREVIEW_CHARS = 140
+const PRIORITIES = new Set(['critical', 'high', 'medium', 'low'])
+const FAILED_RUNS = new Set(['failed', 'timed_out'])
+const SHOWN_RUNS = 50
+const MAX_ANSWERS = 20
 
 export class PaperclipError extends Error {
   constructor(status, message) {
@@ -50,6 +54,9 @@ async function call(path, { method = 'GET', body, fetcher = fetch } = {}) {
   return json
 }
 
+/** For extras a screen can live without: losing one must not take the whole screen down. */
+const orElse = (promise, fallback) => promise.catch(() => fallback)
+
 async function companyId(options) {
   if (COMPANY) return COMPANY
   const companies = await call('/companies', options)
@@ -67,22 +74,34 @@ const botView = (agent, liveAgents) => ({
   spentCents: agent.spentMonthlyCents || 0,
 })
 
-const jobView = (issue, names) => ({
+const jobView = (issue, names, projects = new Map()) => ({
   id: issue.id,
   ref: issue.identifier || '',
   title: issue.title,
   status: issue.status,
   bot: names.get(issue.assigneeAgentId) || '',
+  project: projects.get(issue.projectId) || '',
+  projectId: issue.projectId || '',
+  priority: issue.priority || 'medium',
   updatedAt: issue.lastActivityAt || issue.updatedAt || issue.createdAt,
 })
 
-function needsYou({ approvals, issues, names, failedRuns }) {
+const attentionView = (item, kind) => ({
+  kind,
+  id: item.subject?.metadata?.issueId || '',
+  title: item.subject?.title || item.whyNow || 'Needs a look',
+  detail: item.whyNow || '',
+})
+
+function needsYou({ approvals, attention, issues, names, failedRuns }) {
   const items = approvals.map((a) => ({
     kind: 'approval',
     id: a.id,
     title: a.payload?.title || a.payload?.name || a.type,
     detail: a.requestedByAgentId ? `Asked by ${names.get(a.requestedByAgentId) || 'a bot'}` : '',
   }))
+  const noticed = (...kinds) => attention.filter((item) => kinds.includes(item.sourceKind))
+  items.push(...noticed('issue_thread_interaction').map((item) => attentionView(item, 'question')))
   for (const issue of issues) {
     if (issue.status === 'blocked' || issue.status === 'in_review') {
       items.push({
@@ -93,16 +112,26 @@ function needsYou({ approvals, issues, names, failedRuns }) {
       })
     }
   }
-  if (failedRuns > 0) {
+  const failures = noticed('failed_run', 'agent_error_alert')
+  items.push(...failures.map((item) => attentionView(item, 'failed')))
+  if (!failures.length && failedRuns > 0) {
     items.push({ kind: 'failed', id: '', title: `${failedRuns} failed run${failedRuns === 1 ? '' : 's'}`, detail: 'Open Paperclip to see why' })
   }
   return items
 }
 
+/** Tokens the bots used per provider. Subscription runs bill nothing, so dollars would always read zero. */
+const usageView = (rows) => rows.map((row) => ({
+  provider: row.provider,
+  window: row.window,
+  tokens: (row.inputTokens || 0) + (row.outputTokens || 0),
+  cachedTokens: row.cachedInputTokens || 0,
+}))
+
 /** Everything the phone's first screen needs, in one call. */
 export async function studioSummary(options) {
   const id = await companyId(options)
-  const [company, agents, issues, approvals, dashboard, badges, live] = await Promise.all([
+  const [company, agents, issues, approvals, dashboard, badges, live, projects, attention, spend] = await Promise.all([
     call(`/companies/${id}`, options),
     call(`/companies/${id}/agents`, options),
     call(`/companies/${id}/issues`, options),
@@ -110,17 +139,24 @@ export async function studioSummary(options) {
     call(`/companies/${id}/dashboard`, options),
     call(`/companies/${id}/sidebar-badges`, options),
     call(`/companies/${id}/live-runs`, options),
+    orElse(call(`/companies/${id}/projects`, options), []),
+    orElse(call(`/companies/${id}/attention`, options), { items: [] }),
+    orElse(call(`/companies/${id}/costs/window-spend`, options), []),
   ])
   const names = new Map(agents.map((a) => [a.id, a.name]))
+  const projectNames = new Map(projects.map((p) => [p.id, p.name]))
+  const view = (issue) => jobView(issue, names, projectNames)
   const liveAgents = new Set(live.map((run) => run.agentId))
   const byNewest = [...issues].sort((a, b) => String(b.lastActivityAt || '').localeCompare(String(a.lastActivityAt || '')))
   return {
     company: company.name,
     bots: agents.map((a) => botView(a, liveAgents)),
-    needsYou: needsYou({ approvals, issues, names, failedRuns: badges?.failedRuns || 0 }),
-    running: byNewest.filter((i) => RUNNING.has(i.status)).map((i) => jobView(i, names)),
-    queued: byNewest.filter((i) => QUEUED.has(i.status)).map((i) => jobView(i, names)),
-    finished: byNewest.filter((i) => FINISHED.has(i.status)).slice(0, SHOWN_DONE).map((i) => jobView(i, names)),
+    projects: projects.map((p) => ({ id: p.id, name: p.name })),
+    needsYou: needsYou({ approvals, attention: attention?.items || [], issues, names, failedRuns: badges?.failedRuns || 0 }),
+    running: byNewest.filter((i) => RUNNING.has(i.status)).map(view),
+    queued: byNewest.filter((i) => QUEUED.has(i.status)).map(view),
+    finished: byNewest.filter((i) => FINISHED.has(i.status)).slice(0, SHOWN_DONE).map(view),
+    usage: usageView(spend),
     spentCents: dashboard?.costs?.monthSpendCents || 0,
     at: Date.now(),
   }
@@ -132,17 +168,70 @@ function authorOf(comment, names) {
   return comment.authorAgentId ? names.get(comment.authorAgentId) || 'A bot' : 'You'
 }
 
+/** A question a bot is waiting on, in the two forms the app can answer. Other kinds stay in Paperclip. */
+function questionView(interaction) {
+  const { id, kind, title, payload } = interaction
+  if (kind === 'ask_user_questions') {
+    return {
+      id,
+      kind: 'choice',
+      title: title || payload?.title || 'A bot has a question',
+      items: (payload?.questions || []).map((q) => ({
+        id: q.id,
+        prompt: q.prompt,
+        multiple: q.selectionMode === 'multi',
+        required: Boolean(q.required),
+        options: (q.options || []).map((o) => ({ id: o.id, label: o.label, hint: o.description || '' })),
+      })),
+    }
+  }
+  if (kind === 'request_confirmation') {
+    return {
+      id,
+      kind: 'confirm',
+      title: title || 'A bot wants a yes or no',
+      prompt: payload?.prompt || '',
+      accept: payload?.acceptLabel || 'Yes',
+      reject: payload?.rejectLabel || 'No',
+    }
+  }
+  return null
+}
+
+/** The latest run on this job: whether it is live, and why it failed if it did. */
+function runView(runs, live, names) {
+  const latest = live[0] || runs.find((r) => r.issueId)
+  if (!latest) return null
+  const failed = !live.length && FAILED_RUNS.has(latest.status)
+  return {
+    id: latest.id,
+    live: live.length > 0,
+    status: latest.status,
+    bot: names.get(latest.agentId) || '',
+    why: failed ? latest.error || latest.errorCode || 'The run stopped without saying why' : '',
+    at: latest.finishedAt || latest.startedAt || latest.createdAt || '',
+  }
+}
+
 export async function jobDetail(jobId, options) {
   if (!ID.test(jobId)) throw new PaperclipError(400, 'That is not a job id')
-  const [issue, comments] = await Promise.all([
+  const [issue, comments, interactions, live] = await Promise.all([
     call(`/issues/${jobId}`, options),
     call(`/issues/${jobId}/comments`, options),
+    orElse(call(`/issues/${jobId}/interactions`, options), []),
+    orElse(call(`/issues/${jobId}/live-runs`, options), []),
   ])
-  const agents = await call(`/companies/${issue.companyId}/agents`, options)
+  const [agents, runs, projects] = await Promise.all([
+    call(`/companies/${issue.companyId}/agents`, options),
+    orElse(call(`/companies/${issue.companyId}/heartbeat-runs?limit=${SHOWN_RUNS}&summary=true`, options), []),
+    orElse(call(`/companies/${issue.companyId}/projects`, options), []),
+  ])
   const names = new Map(agents.map((a) => [a.id, a.name]))
   return {
-    ...jobView(issue, names),
+    ...jobView(issue, names, new Map(projects.map((p) => [p.id, p.name]))),
     description: issue.description || '',
+    run: runView(runs.filter((r) => r.issueId === jobId), live, names),
+    questions: interactions.filter((i) => i.status === 'pending').map(questionView).filter(Boolean),
     comments: comments.map((c) => ({
       id: c.id,
       from: authorOf(c, names),
@@ -217,22 +306,27 @@ export async function sendChat(botId, text, requestId, options) {
   return { id: comment.id }
 }
 
-/** A new job goes to the top of the org chart, which decides who does it. */
-export async function addJob({ title, description = '' } = {}, options) {
+/** A new job goes to the top of the org chart, which decides who does it, unless a bot is named. */
+export async function addJob({ title, description = '', projectId, botId, priority = 'medium' } = {}, options) {
   const name = typeof title === 'string' ? title.trim() : ''
   if (!name) throw new PaperclipError(400, 'A job needs a title')
   if (name.length > MAX_TITLE) throw new PaperclipError(400, `Job titles are limited to ${MAX_TITLE} characters`)
   if (typeof description !== 'string' || description.length > MAX_TEXT) {
     throw new PaperclipError(400, `Job details are limited to ${MAX_TEXT} characters`)
   }
+  if (!PRIORITIES.has(priority)) throw new PaperclipError(400, 'Priority must be critical, high, medium or low')
   const id = await companyId(options)
-  const agents = await call(`/companies/${id}/agents`, options)
-  const lead = agents.find((a) => a.role === 'ceo')
-  if (!lead) throw new PaperclipError(409, 'Paperclip has no director to give this job to')
+  const [agents, projects] = await Promise.all([
+    call(`/companies/${id}/agents`, options),
+    projectId ? call(`/companies/${id}/projects`, options) : [],
+  ])
+  const owner = botId ? agents.find((a) => a.id === botId) : agents.find((a) => a.role === 'ceo')
+  if (!owner) throw botId ? new PaperclipError(400, 'That bot is not in this studio') : new PaperclipError(409, 'Paperclip has no director to give this job to')
+  if (projectId && !projects.some((p) => p.id === projectId)) throw new PaperclipError(400, 'That project is not in this studio')
   const issue = await call(`/companies/${id}/issues`, {
     ...options,
     method: 'POST',
-    body: { title: name, description: description.trim(), status: 'todo', priority: 'medium', assigneeAgentId: lead.id },
+    body: { title: name, description: description.trim(), status: 'todo', priority, assigneeAgentId: owner.id, ...(projectId ? { projectId } : {}) },
   })
   return { id: issue.id, ref: issue.identifier || '' }
 }
@@ -251,5 +345,59 @@ export async function decideApproval(approvalId, decision, note, options) {
   if (decision !== 'approve' && decision !== 'reject') throw new PaperclipError(400, 'Choose approve or reject')
   const decisionNote = typeof note === 'string' ? note.trim().slice(0, MAX_TEXT) : ''
   await call(`/approvals/${approvalId}/${decision}`, { ...options, method: 'POST', body: decisionNote ? { decisionNote } : {} })
+  return { ok: true }
+}
+
+/** Stops whatever is running on a job now. The job stays open, so a comment can start it again. */
+export async function stopJob(jobId, options) {
+  if (!ID.test(jobId)) throw new PaperclipError(400, 'That is not a job id')
+  const live = await call(`/issues/${jobId}/live-runs`, options)
+  await Promise.all(live.map((run) => call(`/heartbeat-runs/${run.id}/cancel`, { ...options, method: 'POST', body: {} })))
+  return { stopped: live.length }
+}
+
+async function setJobStatus(jobId, status, options) {
+  if (!ID.test(jobId)) throw new PaperclipError(400, 'That is not a job id')
+  await call(`/issues/${jobId}`, { ...options, method: 'PATCH', body: { status } })
+  return { ok: true }
+}
+
+export const cancelJob = (jobId, options) => setJobStatus(jobId, 'cancelled', options)
+export const reopenJob = (jobId, options) => setJobStatus(jobId, 'todo', options)
+
+async function setBotRunning(botId, action, options) {
+  if (!ID.test(botId)) throw new PaperclipError(400, 'That is not a bot id')
+  await call(`/agents/${botId}/${action}`, { ...options, method: 'POST', body: {} })
+  return { ok: true }
+}
+
+export const pauseBot = (botId, options) => setBotRunning(botId, 'pause', options)
+export const resumeBot = (botId, options) => setBotRunning(botId, 'resume', options)
+
+function questionPath(jobId, questionId, verb) {
+  if (!ID.test(jobId) || !ID.test(questionId)) throw new PaperclipError(400, 'That is not a question id')
+  return `/issues/${jobId}/interactions/${questionId}/${verb}`
+}
+
+const answerView = (answer) => ({
+  questionId: String(answer?.questionId || ''),
+  optionIds: Array.isArray(answer?.optionIds) ? answer.optionIds.map(String) : [],
+  ...(typeof answer?.otherText === 'string' ? { otherText: answer.otherText.slice(0, MAX_TEXT) } : {}),
+})
+
+export async function answerQuestion(jobId, questionId, answers, options) {
+  if (!Array.isArray(answers) || !answers.length || answers.length > MAX_ANSWERS) throw new PaperclipError(400, 'Answer the question first')
+  await call(questionPath(jobId, questionId, 'respond'), { ...options, method: 'POST', body: { answers: answers.map(answerView) } })
+  return { ok: true }
+}
+
+export async function acceptQuestion(jobId, questionId, options) {
+  await call(questionPath(jobId, questionId, 'accept'), { ...options, method: 'POST', body: {} })
+  return { ok: true }
+}
+
+export async function rejectQuestion(jobId, questionId, reason, options) {
+  const note = typeof reason === 'string' ? reason.trim().slice(0, MAX_TEXT) : ''
+  await call(questionPath(jobId, questionId, 'reject'), { ...options, method: 'POST', body: note ? { reason: note } : {} })
   return { ok: true }
 }

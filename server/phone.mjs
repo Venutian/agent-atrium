@@ -12,7 +12,10 @@
 import http from 'node:http'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
-import { PaperclipError, addComment, addJob, chatList, chatThread, decideApproval, jobDetail, sendChat, studioSummary } from './lib/paperclip.mjs'
+import {
+  PaperclipError, acceptQuestion, addComment, addJob, answerQuestion, cancelJob, chatList, chatThread, decideApproval,
+  jobDetail, pauseBot, rejectQuestion, reopenJob, resumeBot, sendChat, stopJob, studioSummary,
+} from './lib/paperclip.mjs'
 import { scanThreads } from './scan.mjs'
 
 const MIN_TOKEN = 32
@@ -20,6 +23,8 @@ const MAX_BODY = 16 * 1024
 const MAX_FAILURES = 10
 const FAILURE_WINDOW_MS = 5 * 60 * 1000
 const SHOWN_SESSIONS = 12
+const JOB_ACTIONS = { stop: stopJob, cancel: cancelJob, reopen: reopenJob }
+const BOT_ACTIONS = { pause: pauseBot, resume: resumeBot }
 
 const digest = (value) => createHash('sha256').update(String(value)).digest()
 
@@ -95,6 +100,9 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions })
     const { pathname } = new URL(req.url, 'http://phone')
     const job = /^\/v1\/jobs\/([^/]+)$/.exec(pathname)
     const comment = /^\/v1\/jobs\/([^/]+)\/comments$/.exec(pathname)
+    const jobAction = /^\/v1\/jobs\/([^/]+)\/(stop|cancel|reopen)$/.exec(pathname)
+    const question = /^\/v1\/jobs\/([^/]+)\/questions\/([^/]+)\/(respond|accept|reject)$/.exec(pathname)
+    const botAction = /^\/v1\/bots\/([^/]+)\/(pause|resume)$/.exec(pathname)
     const decision = /^\/v1\/approvals\/([^/]+)\/(approve|reject)$/.exec(pathname)
     const chat = /^\/v1\/chats\/([^/]+)$/.exec(pathname)
     const chatMessage = /^\/v1\/chats\/([^/]+)\/messages$/.exec(pathname)
@@ -110,6 +118,15 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions })
       if (comment && req.method === 'POST') {
         const body = await readBody(req)
         return send(res, 201, await addComment(comment[1], body.text, options))
+      }
+      if (jobAction && req.method === 'POST') return send(res, 200, await JOB_ACTIONS[jobAction[2]](jobAction[1], options))
+      if (botAction && req.method === 'POST') return send(res, 200, await BOT_ACTIONS[botAction[2]](botAction[1], options))
+      if (question && req.method === 'POST') {
+        const [, jobId, questionId, verb] = question
+        const body = await readBody(req)
+        if (verb === 'respond') return send(res, 200, await answerQuestion(jobId, questionId, body.answers, options))
+        if (verb === 'accept') return send(res, 200, await acceptQuestion(jobId, questionId, options))
+        return send(res, 200, await rejectQuestion(jobId, questionId, body.reason, options))
       }
       if (decision && req.method === 'POST') {
         const body = await readBody(req)
