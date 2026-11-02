@@ -21,6 +21,22 @@ So archiving is the atrium's own bookkeeping now. The bot walks back to receptio
 as before, and archiving in the harness's own UI still sends it home too, because the scan reads
 that flag. `setArchived` is not part of the adapter interface and adding one back is a bug.
 
+## The office API stays on this machine; the phone gets its own door
+
+`server/phone.mjs` is a second server with a short list of named actions, and the office API is
+not reachable through it. Opening the office API to the network would have been less code, but
+that API can start sessions and run commands, and the reason it answers only its own page is that
+nothing on it was designed to face another device.
+
+The door proxies nothing. Each action is written out, every Paperclip record is reduced to the
+fields the phone shows, and a new action means a new line here rather than a wider pattern. It
+refuses any request with an Origin header, because the app sends none and browsers always do.
+Paperclip itself stays on loopback: this door is the only thing that talks to it from outside.
+
+The token comes from the environment, because `data/atrium.json` is the only file this project
+writes. Adding a job, a comment or an approval decision are the only writes, each one a person
+asking by name, and they go to Paperclip's API rather than to any harness's store.
+
 ## Nothing is read from or executed inside another application's bundle
 
 Only files under the user's own home directory.

@@ -330,6 +330,21 @@ Every agent that is installed shows up at once. To add a new one in code, see
   dark the talk thins out. It is on, but silent until your first click, as browsers require.
   To use your own recordings, see [public/audio/README.md](public/audio/README.md).
 
+## The phone door
+
+If you run [Paperclip](https://github.com/paperclipai/paperclip) on this machine, a phone app can
+add jobs, read their updates and answer approvals through a small separate server. It is off
+until you start it, and it needs a token of at least 32 characters:
+
+```bash
+AGENT_ATRIUM_PHONE_TOKEN="$(openssl rand -hex 32)" AGENT_ATRIUM_PHONE_HOST=0.0.0.0 npm run phone
+```
+
+It listens on port 5288. Keep it on a network you trust, such as Tailscale: the token is the only
+thing protecting it, and plain HTTP does not hide the token from others on the same Wi-Fi. The
+office page and its API stay on this machine either way. `AGENT_ATRIUM_PAPERCLIP_URL` and
+`AGENT_ATRIUM_PAPERCLIP_COMPANY` point it at a different Paperclip or company.
+
 ## Credits and licence
 
 Agent Atrium is a fork of [Bot Crossing](https://github.com/Station-Sciences/bot-crossing) by

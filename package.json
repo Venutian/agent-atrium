@@ -51,6 +51,7 @@
     "build": "npm run assets --silent && vite build",
     "start": "npm run build && node server/serve.mjs",
     "serve": "node server/serve.mjs",
+    "phone": "node server/phone.mjs",
     "demo": "npm run build && node server/serve.mjs --demo",
     "assets": "node tools/build-assets.mjs",
     "test": "node --test \"test/**/*.test.mjs\""
