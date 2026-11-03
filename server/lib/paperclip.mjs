@@ -27,6 +27,9 @@ const PRIORITIES = new Set(['critical', 'high', 'medium', 'low'])
 const FAILED_RUNS = new Set(['failed', 'timed_out'])
 const SHOWN_RUNS = 50
 const MAX_ANSWERS = 20
+const REPORT_MS = 24 * 60 * 60 * 1000
+const SCHEDULES = { nightly: '0 3 * * *', morning: '0 7 * * *', weekdays: '0 7 * * 1-5', weekly: '0 4 * * 1' }
+const TIMEZONE = /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/
 const PROOF_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const MAX_PROOF_BYTES = 12 * 1024 * 1024
 
@@ -130,6 +133,17 @@ const usageView = (rows) => rows.map((row) => ({
   cachedTokens: row.cachedInputTokens || 0,
 }))
 
+/** What happened in the last day, worked out from the jobs themselves with no AI. */
+function dayReport({ issues, names, projects, spend, now = Date.now() }) {
+  const since = now - REPORT_MS
+  const finished = issues.filter((i) => i.status === 'done' && Date.parse(i.completedAt || i.updatedAt || 0) >= since)
+  return {
+    finished: finished.slice(0, SHOWN_DONE).map((i) => ({ id: i.id, ref: i.identifier || '', title: i.title, bot: names.get(i.assigneeAgentId) || '', project: projects.get(i.projectId) || '' })),
+    finishedCount: finished.length,
+    tokens: usageView(spend.filter((row) => row.window === '24h')),
+  }
+}
+
 /** Everything the phone's first screen needs, in one call. */
 export async function studioSummary(options) {
   const id = await companyId(options)
@@ -159,6 +173,7 @@ export async function studioSummary(options) {
     queued: byNewest.filter((i) => QUEUED.has(i.status)).map(view),
     finished: byNewest.filter((i) => FINISHED.has(i.status)).slice(0, SHOWN_DONE).map(view),
     usage: usageView(spend),
+    report: dayReport({ issues, names, projects: projectNames, spend }),
     spentCents: dashboard?.costs?.monthSpendCents || 0,
     at: Date.now(),
   }
@@ -376,6 +391,72 @@ export async function proofImage(attachmentId, { fetcher = fetch } = {}) {
   const bytes = Buffer.from(await res.arrayBuffer())
   if (bytes.length > MAX_PROOF_BYTES) throw new PaperclipError(413, 'That image is too large')
   return { type, bytes }
+}
+
+const routineView = (routine, names, projects) => {
+  const schedule = (routine.triggers || []).find((t) => t.kind === 'schedule' && !t.archived)
+  return {
+    id: routine.id,
+    title: routine.title,
+    paused: routine.status !== 'active',
+    bot: names.get(routine.assigneeAgentId) || '',
+    project: projects.get(routine.projectId) || '',
+    cron: schedule?.cronExpression || '',
+    nextAt: schedule?.nextRunAt || null,
+    lastAt: routine.lastTriggeredAt || routine.lastRun?.triggeredAt || null,
+    lastStatus: routine.lastRun?.status || '',
+  }
+}
+
+export async function routineList(options) {
+  const id = await companyId(options)
+  const [routines, agents, projects] = await Promise.all([
+    call(`/companies/${id}/routines`, options),
+    call(`/companies/${id}/agents`, options),
+    orElse(call(`/companies/${id}/projects`, options), []),
+  ])
+  const names = new Map(agents.map((a) => [a.id, a.name]))
+  const projectNames = new Map(projects.map((p) => [p.id, p.name]))
+  return routines.filter((r) => r.status !== 'archived').map((r) => routineView(r, names, projectNames))
+}
+
+/** A repeating job, on one of a few fixed schedules so the phone never writes a cron line. */
+export async function addRoutine({ title, description = '', botId, projectId, schedule, timezone = 'UTC' } = {}, options) {
+  const name = typeof title === 'string' ? title.trim() : ''
+  if (!name) throw new PaperclipError(400, 'A routine needs a title')
+  if (name.length > MAX_TITLE) throw new PaperclipError(400, `Titles are limited to ${MAX_TITLE} characters`)
+  if (typeof description !== 'string' || description.length > MAX_TEXT) throw new PaperclipError(400, `Details are limited to ${MAX_TEXT} characters`)
+  const cronExpression = Object.hasOwn(SCHEDULES, schedule) ? SCHEDULES[schedule] : null
+  if (!cronExpression) throw new PaperclipError(400, 'Choose a schedule')
+  if (typeof timezone !== 'string' || !TIMEZONE.test(timezone)) throw new PaperclipError(400, 'That is not a time zone')
+  const id = await companyId(options)
+  const [agents, projects] = await Promise.all([call(`/companies/${id}/agents`, options), projectId ? call(`/companies/${id}/projects`, options) : []])
+  const owner = botId ? agents.find((a) => a.id === botId) : agents.find((a) => a.role === 'ceo')
+  if (!owner) throw new PaperclipError(400, 'That bot is not in this studio')
+  if (projectId && !projects.some((p) => p.id === projectId)) throw new PaperclipError(400, 'That project is not in this studio')
+  const routine = await call(`/companies/${id}/routines`, {
+    ...options,
+    method: 'POST',
+    body: { title: name, description: description.trim(), assigneeAgentId: owner.id, ...(projectId ? { projectId } : {}) },
+  })
+  await call(`/routines/${routine.id}/triggers`, { ...options, method: 'POST', body: { kind: 'schedule', cronExpression, timezone } })
+  return { id: routine.id }
+}
+
+async function setRoutineStatus(routineId, status, options) {
+  if (!ID.test(routineId)) throw new PaperclipError(400, 'That is not a routine id')
+  await call(`/routines/${routineId}`, { ...options, method: 'PATCH', body: { status } })
+  return { ok: true }
+}
+
+export const pauseRoutine = (id, options) => setRoutineStatus(id, 'paused', options)
+export const resumeRoutine = (id, options) => setRoutineStatus(id, 'active', options)
+export const removeRoutine = (id, options) => setRoutineStatus(id, 'archived', options)
+
+export async function runRoutine(routineId, options) {
+  if (!ID.test(routineId)) throw new PaperclipError(400, 'That is not a routine id')
+  await call(`/routines/${routineId}/run`, { ...options, method: 'POST', body: {} })
+  return { ok: true }
 }
 
 /** Stops whatever is running on a job now. The job stays open, so a comment can start it again. */

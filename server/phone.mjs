@@ -13,9 +13,12 @@ import http from 'node:http'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { changeCounts, changeDetail } from './lib/changes.mjs'
+import { addDevice, deviceView, devicesFile, findDevice, readDevices, retireShared, revokeDevice, touchDevice } from './lib/devices.mjs'
+import { guardFolder, readGuard, writeGuard } from './lib/guard.mjs'
 import {
-  PaperclipError, acceptQuestion, addComment, addJob, answerQuestion, cancelJob, chatList, chatThread, decideApproval,
-  jobDetail, jobWorkspace, pauseBot, proofImage, rejectQuestion, reopenJob, resumeBot, sendChat, stopJob, studioSummary,
+  PaperclipError, acceptQuestion, addComment, addJob, addRoutine, answerQuestion, cancelJob, chatList, chatThread, decideApproval,
+  jobDetail, jobWorkspace, pauseBot, pauseRoutine, proofImage, rejectQuestion, removeRoutine, reopenJob, resumeBot, resumeRoutine,
+  routineList, runRoutine, sendChat, stopJob, studioSummary,
 } from './lib/paperclip.mjs'
 import { PREVIEW_PORT, listPreviews, previewRoot, startPreviews } from './lib/previews.mjs'
 import { scanThreads } from './scan.mjs'
@@ -27,6 +30,8 @@ const FAILURE_WINDOW_MS = 5 * 60 * 1000
 const SHOWN_SESSIONS = 12
 const JOB_ACTIONS = { stop: stopJob, cancel: cancelJob, reopen: reopenJob }
 const BOT_ACTIONS = { pause: pauseBot, resume: resumeBot }
+const ROUTINE_ACTIONS = { run: runRoutine, pause: pauseRoutine, resume: resumeRoutine, remove: removeRoutine }
+const SEEN_EVERY_MS = 60 * 1000
 
 const digest = (value) => createHash('sha256').update(String(value)).digest()
 
@@ -86,8 +91,9 @@ async function liveSessions() {
     .map((t) => ({ title: t.title || 'Session', harness: t.harness, project: t.project || t.cwdName || '' }))
 }
 
-export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, previews = previewRoot(), previewPort = PREVIEW_PORT }) {
+export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, previews = previewRoot(), previewPort = PREVIEW_PORT, devices = devicesFile(), guard = guardFolder() }) {
   const failures = new Map()
+  const seen = new Map()
   const options = paperclip.fetcher ? { fetcher: paperclip.fetcher } : undefined
 
   const lockedOut = (ip) => {
@@ -109,11 +115,17 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
     const ip = req.socket?.remoteAddress || ''
     if (req.headers.origin) return send(res, 403, { error: 'The phone door does not answer web pages' })
     if (lockedOut(ip)) return send(res, 429, { error: 'Too many wrong tokens. Try again later' })
-    if (!tokenMatches(req.headers.authorization, token)) {
+    const key = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1]
+    const device = key ? findDevice(devices, key) : null
+    if (!device && (readDevices(devices).sharedRetired || !tokenMatches(req.headers.authorization, token))) {
       failed(ip)
       return send(res, 401, { error: 'Wrong or missing token' })
     }
     failures.delete(ip)
+    if (device && Date.now() - (seen.get(device.id) || 0) > SEEN_EVERY_MS) {
+      seen.set(device.id, Date.now())
+      touchDevice(devices, device.id)
+    }
 
     const { pathname } = new URL(req.url, 'http://phone')
     const job = /^\/v1\/jobs\/([^/]+)$/.exec(pathname)
@@ -122,6 +134,8 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
     const proof = /^\/v1\/proof\/([^/]+)$/.exec(pathname)
     const jobAction = /^\/v1\/jobs\/([^/]+)\/(stop|cancel|reopen)$/.exec(pathname)
     const question = /^\/v1\/jobs\/([^/]+)\/questions\/([^/]+)\/(respond|accept|reject)$/.exec(pathname)
+    const routineAction = /^\/v1\/routines\/([^/]+)\/(run|pause|resume|remove)$/.exec(pathname)
+    const deviceRevoke = /^\/v1\/devices\/([^/]+)\/revoke$/.exec(pathname)
     const botAction = /^\/v1\/bots\/([^/]+)\/(pause|resume)$/.exec(pathname)
     const decision = /^\/v1\/approvals\/([^/]+)\/(approve|reject)$/.exec(pathname)
     const chat = /^\/v1\/chats\/([^/]+)$/.exec(pathname)
@@ -129,7 +143,9 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
     try {
       if (pathname === '/v1/summary' && req.method === 'GET') {
         const [summary, live] = await Promise.all([studioSummary(options), sessions()])
-        return send(res, 200, { ...summary, sessions: live })
+        const limits = readGuard(guard)
+        const paused = limits.tripped ? [{ kind: 'blocked', id: '', title: 'Claude bots are paused', detail: 'The token guard stopped them at your limit. Raise it or turn it off in Studio.' }] : []
+        return send(res, 200, { ...summary, needsYou: [...paused, ...summary.needsYou], sessions: live, guard: limits })
       }
       if (pathname === '/v1/jobs' && req.method === 'POST') {
         return send(res, 201, await addJob(await readBody(req), options))
@@ -150,6 +166,25 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
       if (comment && req.method === 'POST') {
         const body = await readBody(req)
         return send(res, 201, await addComment(comment[1], body.text, options))
+      }
+      if (pathname === '/v1/routines' && req.method === 'GET') return send(res, 200, { routines: await routineList(options) })
+      if (pathname === '/v1/routines' && req.method === 'POST') return send(res, 201, await addRoutine(await readBody(req), options))
+      if (routineAction && req.method === 'POST') return send(res, 200, await ROUTINE_ACTIONS[routineAction[2]](routineAction[1], options))
+      if (pathname === '/v1/guard' && req.method === 'POST') return send(res, 200, writeGuard(guard, await readBody(req)))
+      if (pathname === '/v1/devices' && req.method === 'GET') {
+        const state = readDevices(devices)
+        return send(res, 200, { sharedActive: !state.sharedRetired, current: device?.id || null, devices: state.devices.map(deviceView) })
+      }
+      if (pathname === '/v1/devices' && req.method === 'POST') return send(res, 201, addDevice(devices, (await readBody(req)).name))
+      if (pathname === '/v1/devices/retire-shared' && req.method === 'POST') {
+        if (!device) return send(res, 409, { error: 'Update this device to its own key first' })
+        retireShared(devices)
+        return send(res, 200, { ok: true })
+      }
+      if (deviceRevoke && req.method === 'POST') {
+        if (device?.id === deviceRevoke[1]) return send(res, 409, { error: 'That is the device you are using' })
+        revokeDevice(devices, deviceRevoke[1])
+        return send(res, 200, { ok: true })
       }
       if (jobAction && req.method === 'POST') return send(res, 200, await JOB_ACTIONS[jobAction[2]](jobAction[1], options))
       if (botAction && req.method === 'POST') return send(res, 200, await BOT_ACTIONS[botAction[2]](botAction[1], options))

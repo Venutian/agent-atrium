@@ -4,7 +4,10 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import http from 'node:http'
+import os from 'node:os'
+import path from 'node:path'
 import { phoneHandler, startPhoneDoor, tokenMatches } from '../server/phone.mjs'
 
 const TOKEN = 'a'.repeat(40)
@@ -14,6 +17,7 @@ const BOT = '77777777-8888-4999-8aaa-111111111111'
 const REQUEST = '88888888-9999-4aaa-8bbb-222222222222'
 const PROJECT = '99999999-aaaa-4bbb-8ccc-333333333333'
 const QUESTION = 'aaaaaaaa-bbbb-4ccc-8ddd-444444444444'
+const ROUTINE = 'bbbbbbbb-cccc-4ddd-8eee-555555555555'
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status })
 
@@ -58,6 +62,14 @@ function paperclip({ calls = [] } = {}) {
     if (path.startsWith('/companies/co/heartbeat-runs')) return json([{ id: 'old', issueId: JOB, agentId: 'bot', status: 'failed', error: 'Tests failed' }])
     if (path.startsWith(`/issues/${JOB}/interactions/${QUESTION}/`)) return json({})
     if (path === `/issues/${JOB}` && init.method === 'PATCH') return json({})
+    if (path === '/companies/co/routines' && init.method === 'POST') return json({ id: ROUTINE }, 201)
+    if (path === '/companies/co/routines') {
+      return json([
+        { id: ROUTINE, title: 'Nightly tests', status: 'active', assigneeAgentId: 'bot', projectId: PROJECT, lastTriggeredAt: '2026-11-02T03:00:00Z', triggers: [{ kind: 'schedule', cronExpression: '0 3 * * *', nextRunAt: '2026-11-03T03:00:00Z' }] },
+        { id: 'gone', title: 'Old', status: 'archived' },
+      ])
+    }
+    if (path.startsWith(`/routines/${ROUTINE}`)) return json({}, init.method === 'POST' ? 201 : 200)
     if (path === `/agents/${BOT}/pause` || path === `/agents/${BOT}/resume`) return json({})
     if (path === '/companies/co/live-runs') return json([{ agentId: 'bot' }])
     if (path === `/issues/${JOB}`) return json({ ...issues[0], description: 'Details' })
@@ -81,7 +93,15 @@ function paperclip({ calls = [] } = {}) {
 }
 
 async function withDoor(run, { calls } = {}) {
-  const handler = phoneHandler({ token: TOKEN, paperclip: paperclip({ calls }), sessions: async () => [{ title: 'Aldis build', harness: 'claude-code', project: 'aldis' }] })
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'atrium-door-'))
+  const handler = phoneHandler({
+    token: TOKEN,
+    paperclip: paperclip({ calls }),
+    sessions: async () => [{ title: 'Aldis build', harness: 'claude-code', project: 'aldis' }],
+    previews: path.join(folder, 'previews'),
+    devices: path.join(folder, 'devices.json'),
+    guard: folder,
+  })
   const server = http.createServer(handler)
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${server.address().port}`
@@ -340,5 +360,67 @@ test('a job lists only image proof, and images come through as images', async ()
 test('a job with no branch has no changes to read', async () => {
   await withDoor(async (ask) => {
     assert.equal((await ask(`/v1/jobs/${JOB}/changes`)).status, 404)
+  })
+})
+
+test('each device gets its own key, and it can be cut off alone', async () => {
+  await withDoor(async (ask) => {
+    const phone = (await ask('/v1/devices', { method: 'POST', body: { name: 'Pixel' } })).body
+    const laptop = (await ask('/v1/devices', { method: 'POST', body: { name: 'Laptop' } })).body
+    assert.equal((await ask('/v1/summary', { token: phone.key })).status, 200)
+    const list = (await ask('/v1/devices', { token: phone.key })).body
+    assert.equal(list.current, phone.id)
+    assert.deepEqual(list.devices.map((d) => d.name), ['Pixel', 'Laptop'])
+    assert.equal(JSON.stringify(list).includes('hash'), false)
+    assert.equal((await ask(`/v1/devices/${phone.id}/revoke`, { method: 'POST', body: {}, token: phone.key })).status, 409)
+    assert.equal((await ask(`/v1/devices/${laptop.id}/revoke`, { method: 'POST', body: {}, token: phone.key })).status, 200)
+    assert.equal((await ask('/v1/summary', { token: laptop.key })).status, 401)
+  })
+})
+
+test('the shared key can only be retired from a device, and stops working after', async () => {
+  await withDoor(async (ask) => {
+    assert.equal((await ask('/v1/devices/retire-shared', { method: 'POST', body: {} })).status, 409)
+    const { key } = (await ask('/v1/devices', { method: 'POST', body: {} })).body
+    assert.equal((await ask('/v1/devices/retire-shared', { method: 'POST', body: {}, token: key })).status, 200)
+    assert.equal((await ask('/v1/summary')).status, 401)
+    assert.equal((await ask('/v1/summary', { token: key })).status, 200)
+    assert.equal((await ask('/v1/devices', { token: key })).body.sharedActive, false)
+  })
+})
+
+test('routines list what is live, and only fixed schedules can be set', async () => {
+  const calls = []
+  await withDoor(async (ask) => {
+    const { body } = await ask('/v1/routines')
+    assert.deepEqual(body.routines.map((r) => r.title), ['Nightly tests'])
+    assert.equal(body.routines[0].bot, 'Scout')
+    assert.equal(body.routines[0].project, 'Baltis')
+    const made = await ask('/v1/routines', { method: 'POST', body: { title: 'Nightly', schedule: 'nightly', timezone: 'Europe/Stockholm', projectId: PROJECT } })
+    assert.equal(made.status, 201)
+    assert.equal(calls.find((c) => c.path.endsWith('/triggers')).body.cronExpression, '0 3 * * *')
+    assert.equal((await ask('/v1/routines', { method: 'POST', body: { title: 'x', schedule: '* * * * *' } })).status, 400)
+    assert.equal((await ask('/v1/routines', { method: 'POST', body: { title: 'x', schedule: 'constructor' } })).status, 400)
+    assert.equal((await ask('/v1/routines', { method: 'POST', body: { title: 'x', schedule: 'nightly', timezone: '../etc' } })).status, 400)
+    for (const action of ['run', 'pause', 'resume', 'remove']) assert.equal((await ask(`/v1/routines/${ROUTINE}/${action}`, { method: 'POST', body: {} })).status, 200)
+    assert.deepEqual(calls.filter((c) => c.path === `/routines/${ROUTINE}` && c.method === 'PATCH').map((c) => c.body.status), ['paused', 'active', 'archived'])
+    assert.equal((await ask('/v1/routines/nope/run', { method: 'POST', body: {} })).status, 400)
+  }, { calls })
+})
+
+test('the token guard is set through the door and reported with the summary', async () => {
+  await withDoor(async (ask) => {
+    assert.equal((await ask('/v1/summary')).body.guard.enabled, false)
+    const set = await ask('/v1/guard', { method: 'POST', body: { enabled: true, limit: 5000000 } })
+    assert.deepEqual([set.body.enabled, set.body.limit], [true, 5000000])
+    assert.equal((await ask('/v1/guard', { method: 'POST', body: { enabled: true, limit: -4 } })).body.limit, 0)
+  })
+})
+
+test('the day report covers finished jobs and tokens', async () => {
+  await withDoor(async (ask) => {
+    const { report } = (await ask('/v1/summary')).body
+    assert.equal(typeof report.finishedCount, 'number')
+    assert.ok(Array.isArray(report.tokens))
   })
 })
