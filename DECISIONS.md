@@ -164,3 +164,12 @@ without knowing about it and pick their uniforms up from the material prototype'
 has to call `withCurve(shader)` itself — otherwise its uniforms are zero, it stays flat, and
 it floats above the ground that bent away under it. Same for a custom depth material, or its
 shadow stays flat while it does not.
+
+## Away from home goes through WireGuard, not an open door
+
+The phone door speaks plain HTTP with a bearer token, so its port is never opened to the
+internet. The phone reaches it through a WireGuard tunnel to the PC instead: no account and no
+service in between, and WireGuard does not answer a packet without the phone's key. Tailscale
+and Cloudflare Tunnel were set aside because each needs an account; Tor because every request
+would take seconds. The door only reads the tunnel's address from `away/away.json` and hands it
+to the app; it never sets the tunnel up and never touches the router.

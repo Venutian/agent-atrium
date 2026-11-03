@@ -12,6 +12,7 @@
 import http from 'node:http'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
+import { awayFile, noteArrival, readAway } from './lib/away.mjs'
 import { changeCounts, changeDetail } from './lib/changes.mjs'
 import { addDevice, deviceView, devicesFile, findDevice, readDevices, retireShared, revokeDevice, touchDevice } from './lib/devices.mjs'
 import { guardFolder, readGuard, writeGuard } from './lib/guard.mjs'
@@ -91,7 +92,7 @@ async function liveSessions() {
     .map((t) => ({ title: t.title || 'Session', harness: t.harness, project: t.project || t.cwdName || '' }))
 }
 
-export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, previews = previewRoot(), previewPort = PREVIEW_PORT, devices = devicesFile(), guard = guardFolder() }) {
+export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, previews = previewRoot(), previewPort = PREVIEW_PORT, devices = devicesFile(), guard = guardFolder(), away = awayFile(), port = 5288 }) {
   const failures = new Map()
   const seen = new Map()
   const options = paperclip.fetcher ? { fetcher: paperclip.fetcher } : undefined
@@ -126,6 +127,11 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
       seen.set(device.id, Date.now())
       touchDevice(devices, device.id)
     }
+    try {
+      noteArrival(away, req.socket?.localAddress)
+    } catch (err) {
+      console.error('Could not note a visit through the tunnel:', err.message)
+    }
 
     const { pathname } = new URL(req.url, 'http://phone')
     const job = /^\/v1\/jobs\/([^/]+)$/.exec(pathname)
@@ -141,11 +147,20 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
     const chat = /^\/v1\/chats\/([^/]+)$/.exec(pathname)
     const chatMessage = /^\/v1\/chats\/([^/]+)\/messages$/.exec(pathname)
     try {
+      // The app knocks here on each address it knows, and keeps the one that answers first.
+      if (pathname === '/v1/hello' && req.method === 'GET') {
+        const tunnel = readAway(away)
+        return send(res, 200, { away: tunnel ? `${tunnel.address}:${port}` : null })
+      }
       if (pathname === '/v1/summary' && req.method === 'GET') {
         const [summary, live] = await Promise.all([studioSummary(options), sessions()])
         const limits = readGuard(guard)
-        const paused = limits.tripped ? [{ kind: 'blocked', id: '', title: 'Claude bots are paused', detail: 'The token guard stopped them at your limit. Raise it or turn it off in Studio.' }] : []
-        return send(res, 200, { ...summary, needsYou: [...paused, ...summary.needsYou], sessions: live, guard: limits })
+        const tunnel = readAway(away)
+        const notices = [
+          ...(limits.tripped ? [{ kind: 'blocked', id: '', title: 'Claude bots are paused', detail: 'The token guard stopped them at your limit. Raise it or turn it off in Studio.' }] : []),
+          ...(tunnel?.changed ? [{ kind: 'blocked', id: '', title: 'Your home internet address changed', detail: `Away access needs it. In the WireGuard app, edit the nGen tunnel and set Endpoint to ${tunnel.endpoint}:${tunnel.port}.` }] : []),
+        ]
+        return send(res, 200, { ...summary, needsYou: [...notices, ...summary.needsYou], sessions: live, guard: limits })
       }
       if (pathname === '/v1/jobs' && req.method === 'POST') {
         return send(res, 201, await addJob(await readBody(req), options))
@@ -173,7 +188,13 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
       if (pathname === '/v1/guard' && req.method === 'POST') return send(res, 200, writeGuard(guard, await readBody(req)))
       if (pathname === '/v1/devices' && req.method === 'GET') {
         const state = readDevices(devices)
-        return send(res, 200, { sharedActive: !state.sharedRetired, current: device?.id || null, devices: state.devices.map(deviceView) })
+        const tunnel = readAway(away)
+        return send(res, 200, {
+          sharedActive: !state.sharedRetired,
+          current: device?.id || null,
+          devices: state.devices.map(deviceView),
+          away: tunnel && { address: tunnel.address, up: tunnel.up, changed: tunnel.changed },
+        })
       }
       if (pathname === '/v1/devices' && req.method === 'POST') return send(res, 201, addDevice(devices, (await readBody(req)).name))
       if (pathname === '/v1/devices/retire-shared' && req.method === 'POST') {
@@ -222,7 +243,7 @@ export function startPhoneDoor(env = process.env) {
   const port = Number(env.AGENT_ATRIUM_PHONE_PORT) || 5288
   const previews = previewRoot(env)
   const previewPort = Number(env.AGENT_ATRIUM_PREVIEW_PORT) || PREVIEW_PORT
-  const server = http.createServer(phoneHandler({ token, previews, previewPort }))
+  const server = http.createServer(phoneHandler({ token, previews, previewPort, away: awayFile(env), port }))
   server.listen(port, host, () => console.log(`Agent Atrium phone door → http://${host}:${port}`))
   startPreviews({ root: previews, host, port: previewPort })
   return server

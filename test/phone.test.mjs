@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { noteArrival, readAway } from '../server/lib/away.mjs'
 import { phoneHandler, startPhoneDoor, tokenMatches } from '../server/phone.mjs'
 
 const TOKEN = 'a'.repeat(40)
@@ -92,8 +93,9 @@ function paperclip({ calls = [] } = {}) {
   return { fetcher }
 }
 
-async function withDoor(run, { calls } = {}) {
+async function withDoor(run, { calls, away } = {}) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'atrium-door-'))
+  if (away) fs.writeFileSync(path.join(folder, 'away.json'), JSON.stringify(away))
   const handler = phoneHandler({
     token: TOKEN,
     paperclip: paperclip({ calls }),
@@ -101,6 +103,7 @@ async function withDoor(run, { calls } = {}) {
     previews: path.join(folder, 'previews'),
     devices: path.join(folder, 'devices.json'),
     guard: folder,
+    away: path.join(folder, 'away.json'),
   })
   const server = http.createServer(handler)
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -423,4 +426,43 @@ test('the day report covers finished jobs and tokens', async () => {
     assert.equal(typeof report.finishedCount, 'number')
     assert.ok(Array.isArray(report.tokens))
   })
+})
+
+const TUNNEL = { address: '10.88.0.1', port: 51820, interface: 'ngen-test', endpoint: '83.1.2.3', phoneEndpoint: '83.1.2.3' }
+
+test('the app learns the tunnel address once away access is set up', async () => {
+  await withDoor(async (ask) => {
+    assert.deepEqual((await ask('/v1/hello')).body, { away: null })
+    assert.equal((await ask('/v1/hello', { token: 'wrong' })).status, 401)
+    assert.equal((await ask('/v1/devices')).body.away, null)
+  })
+  await withDoor(async (ask) => {
+    assert.deepEqual((await ask('/v1/hello')).body, { away: '10.88.0.1:5288' })
+    assert.deepEqual((await ask('/v1/devices')).body.away, { address: '10.88.0.1', up: false, changed: false })
+    assert.ok(!(await ask('/v1/summary')).body.needsYou.some((item) => /address changed/.test(item.title)))
+  }, { away: TUNNEL })
+})
+
+test('a tunnel address outside the private ranges is ignored', async () => {
+  for (const address of ['8.8.8.8', '127.0.0.1', 'evil.example', '10.0.0.1:80']) {
+    await withDoor(async (ask) => {
+      assert.deepEqual((await ask('/v1/hello')).body, { away: null })
+    }, { away: { ...TUNNEL, address } })
+  }
+})
+
+test('a changed home address asks the owner to update the phone, until the phone comes through', async () => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'atrium-away-'))
+  const file = path.join(folder, 'away.json')
+  fs.writeFileSync(file, JSON.stringify({ ...TUNNEL, endpoint: '83.9.9.9' }))
+  await withDoor(async (ask) => {
+    const notice = (await ask('/v1/summary')).body.needsYou.find((item) => /address changed/.test(item.title))
+    assert.match(notice.detail, /83\.9\.9\.9:51820/)
+    assert.equal((await ask('/v1/devices')).body.away.changed, true)
+  }, { away: { ...TUNNEL, endpoint: '83.9.9.9' } })
+  noteArrival(file, '192.168.0.4')
+  assert.equal(readAway(file).changed, true)
+  noteArrival(file, '::ffff:10.88.0.1')
+  assert.equal(readAway(file).changed, false)
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).phoneEndpoint, '83.9.9.9')
 })

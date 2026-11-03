@@ -342,9 +342,11 @@ AGENT_ATRIUM_PHONE_TOKEN="$(openssl rand -hex 32)" AGENT_ATRIUM_PHONE_HOST=0.0.0
 ```
 
 It listens on port 5288, and serves playable builds of finished jobs on port 5290 if a script
-leaves them in `~/.config/agent-atrium/previews`. Keep both on a network you trust, such as
-Tailscale: the token is the only thing protecting the door, and plain HTTP does not hide it from
-others on the same Wi-Fi. The
+leaves them in `~/.config/agent-atrium/previews`. Keep both on a network you trust: the token is
+the only thing protecting the door, and plain HTTP does not hide it from others on the same Wi-Fi.
+For use away from home, put the door behind a WireGuard tunnel rather than opening its port. If
+`~/.config/agent-atrium/away/away.json` names the PC's private address in that tunnel, the door
+hands it to the app at `/v1/hello`, and the app tries both addresses and keeps whichever answers. The
 office page and its API stay on this machine either way. `AGENT_ATRIUM_PAPERCLIP_URL` and
 `AGENT_ATRIUM_PAPERCLIP_COMPANY` point it at a different Paperclip or company.
 
