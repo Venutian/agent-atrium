@@ -41,11 +41,15 @@ export function readAway(file) {
   }
 }
 
-/** Called for a request that arrived on `localAddress`. Through the tunnel, the phone has the current home address. */
-export function noteArrival(file, localAddress) {
-  const local = String(localAddress || '').replace(/^::ffff:/, '')
+/**
+ * Called for each request with the address it came from. The phone's own tunnel address means it
+ * came through the tunnel, whichever of the PC's addresses it asked for, so it has the current home
+ * address.
+ */
+export function noteArrival(file, fromAddress) {
+  const from = String(fromAddress || '').replace(/^::ffff:/, '')
   const away = readJson(file)
-  if (!away || local !== away.address || !away.endpoint || away.phoneEndpoint === away.endpoint) return
+  if (!away || !PRIVATE.test(away.phone || '') || from !== away.phone || !away.endpoint || away.phoneEndpoint === away.endpoint) return
   const next = `${file}.${process.pid}.tmp`
   fs.writeFileSync(next, JSON.stringify({ ...away, phoneEndpoint: away.endpoint }), { mode: 0o600 })
   fs.renameSync(next, file)

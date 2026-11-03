@@ -128,7 +128,7 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
       touchDevice(devices, device.id)
     }
     try {
-      noteArrival(away, req.socket?.localAddress)
+      noteArrival(away, ip)
     } catch (err) {
       console.error('Could not note a visit through the tunnel:', err.message)
     }

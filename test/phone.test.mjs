@@ -428,7 +428,7 @@ test('the day report covers finished jobs and tokens', async () => {
   })
 })
 
-const TUNNEL = { address: '10.88.0.1', port: 51820, interface: 'ngen-test', endpoint: '83.1.2.3', phoneEndpoint: '83.1.2.3' }
+const TUNNEL = { address: '10.88.0.1', phone: '10.88.0.2', port: 51820, interface: 'ngen-test', endpoint: '83.1.2.3', phoneEndpoint: '83.1.2.3' }
 
 test('the app learns the tunnel address once away access is set up', async () => {
   await withDoor(async (ask) => {
@@ -462,7 +462,9 @@ test('a changed home address asks the owner to update the phone, until the phone
   }, { away: { ...TUNNEL, endpoint: '83.9.9.9' } })
   noteArrival(file, '192.168.0.4')
   assert.equal(readAway(file).changed, true)
-  noteArrival(file, '::ffff:10.88.0.1')
+  noteArrival(file, '10.88.0.1')
+  assert.equal(readAway(file).changed, true)
+  noteArrival(file, '::ffff:10.88.0.2')
   assert.equal(readAway(file).changed, false)
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).phoneEndpoint, '83.9.9.9')
 })
