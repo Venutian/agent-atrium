@@ -38,6 +38,16 @@ test('the detail lists commits and patches, and marks binary files', async () =>
   assert.equal(detail.cut, false)
 })
 
+test('a new file starts at its first change, with no headers', async () => {
+  const { cwd, git, workspace } = repo()
+  fs.writeFileSync(path.join(cwd, 'new.txt'), 'hello\n')
+  git('add', '.')
+  git('commit', '-qm', 'New')
+  const file = (await changeDetail(workspace)).files.find((f) => f.path === 'new.txt')
+  assert.ok(file.patch.startsWith('@@'), file.patch)
+  assert.equal(file.patch.includes('+++'), false)
+})
+
 test('a very long file is cut, and says so', async () => {
   const { cwd, git, workspace } = repo()
   fs.writeFileSync(path.join(cwd, 'long.txt'), 'line\n'.repeat(40000))

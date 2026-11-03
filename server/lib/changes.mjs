@@ -75,7 +75,9 @@ export async function changeDetail(workspace) {
   let room = MAX_ALL_PATCHES
   let cut = counts.length > MAX_FILES
   const files = counts.slice(0, MAX_FILES).map((file, index) => {
-    const body = (parts[index] || '').split('\n').slice(file.binary ? 0 : 4).join('\n')
+    // Headers differ for new and deleted files, so start at the first change rather than a line count.
+    const part = parts[index] || ''
+    const body = part.slice(Math.max(0, part.indexOf('@@')))
     const allowed = Math.min(MAX_FILE_PATCH, room)
     if (body.length > allowed) cut = true
     const patch = file.binary ? '' : body.slice(0, allowed)
