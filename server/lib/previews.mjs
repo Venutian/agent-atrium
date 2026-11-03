@@ -40,8 +40,11 @@ async function readManifest(root, key) {
   }
 }
 
-/** What has been built for a job, newest first. `host` is the address the app used to reach this PC. */
-export async function listPreviews(jobId, { root, host, port = PREVIEW_PORT }) {
+/**
+ * What has been built for a job, newest first. `host` is the address the app used to reach this PC,
+ * and `link` makes a build's link some other way, such as through Cloudflare.
+ */
+export async function listPreviews(jobId, { root, host, port = PREVIEW_PORT, link = (key) => `http://${host}:${port}/open/${key}` }) {
   const keys = await fsp.readdir(root).catch(() => [])
   const found = await Promise.all(keys.filter((key) => KEY.test(key)).map(async (key) => ({ key, manifest: await readManifest(root, key) })))
   return found
@@ -54,7 +57,7 @@ export async function listPreviews(jobId, { root, host, port = PREVIEW_PORT }) {
       builtAt: manifest.builtAt || '',
       errors: Number(manifest.errors) || 0,
       note: manifest.ok ? '' : String(manifest.note || '').slice(-1200),
-      url: manifest.ok ? `http://${host}:${port}/open/${key}` : '',
+      url: manifest.ok ? link(key) : '',
     }))
 }
 

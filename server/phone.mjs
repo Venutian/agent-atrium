@@ -14,6 +14,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { awayFile, noteArrival, readAway } from './lib/away.mjs'
 import { changeCounts, changeDetail } from './lib/changes.mjs'
+import { cameThroughEdge, edgeFile, readEdge, signPlay } from './lib/edge.mjs'
 import { addDevice, deviceView, devicesFile, findDevice, readDevices, retireShared, revokeDevice, touchDevice } from './lib/devices.mjs'
 import { guardFolder, readGuard, writeGuard } from './lib/guard.mjs'
 import {
@@ -67,6 +68,9 @@ const hostOf = (req) => {
   return /^[\w.-]+$/.test(host) ? host : '127.0.0.1'
 }
 
+/** Build links for an app that came through Cloudflare: signed, on the play address. */
+const playLink = (cloud) => (cloud ? (key) => `https://${cloud.play}/open/${key}?g=${signPlay(cloud.gate, key)}` : undefined)
+
 async function readBody(req) {
   const chunks = []
   let size = 0
@@ -92,7 +96,7 @@ async function liveSessions() {
     .map((t) => ({ title: t.title || 'Session', harness: t.harness, project: t.project || t.cwdName || '' }))
 }
 
-export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, previews = previewRoot(), previewPort = PREVIEW_PORT, devices = devicesFile(), guard = guardFolder(), away = awayFile(), port = 5288 }) {
+export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, previews = previewRoot(), previewPort = PREVIEW_PORT, devices = devicesFile(), guard = guardFolder(), away = awayFile(), edge = edgeFile(), port = 5288 }) {
   const failures = new Map()
   const seen = new Map()
   const options = paperclip.fetcher ? { fetcher: paperclip.fetcher } : undefined
@@ -113,7 +117,10 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
   }
 
   return async (req, res) => {
-    const ip = req.socket?.remoteAddress || ''
+    // Through Cloudflare every request comes from this PC's tunnel, so wrong keys count against the
+    // phone's own address, which the Worker passes on.
+    const viaEdge = cameThroughEdge(req)
+    const ip = viaEdge ? `edge:${String(req.headers['x-ngen-client'] || '')}` : req.socket?.remoteAddress || ''
     if (req.headers.origin) return send(res, 403, { error: 'The phone door does not answer web pages' })
     if (lockedOut(ip)) return send(res, 429, { error: 'Too many wrong tokens. Try again later' })
     const key = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1]
@@ -150,7 +157,11 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
       // The app knocks here on each address it knows, and keeps the one that answers first.
       if (pathname === '/v1/hello' && req.method === 'GET') {
         const tunnel = readAway(away)
-        return send(res, 200, { away: tunnel ? `${tunnel.address}:${port}` : null })
+        const cloud = readEdge(edge)
+        return send(res, 200, {
+          away: tunnel ? `${tunnel.address}:${port}` : null,
+          edge: cloud ? { host: `https://${cloud.studio}`, gate: cloud.gate } : null,
+        })
       }
       if (pathname === '/v1/summary' && req.method === 'GET') {
         const [summary, live] = await Promise.all([studioSummary(options), sessions()])
@@ -169,7 +180,7 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
         const [detail, workspace, builds] = await Promise.all([
           jobDetail(job[1], options),
           jobWorkspace(job[1], options),
-          listPreviews(job[1], { root: previews, host: hostOf(req), port: previewPort }),
+          listPreviews(job[1], { root: previews, host: hostOf(req), port: previewPort, link: viaEdge ? playLink(readEdge(edge)) : undefined }),
         ])
         return send(res, 200, { ...detail, changes: await changeCounts(workspace ?? undefined), previews: builds })
       }
@@ -243,7 +254,7 @@ export function startPhoneDoor(env = process.env) {
   const port = Number(env.AGENT_ATRIUM_PHONE_PORT) || 5288
   const previews = previewRoot(env)
   const previewPort = Number(env.AGENT_ATRIUM_PREVIEW_PORT) || PREVIEW_PORT
-  const server = http.createServer(phoneHandler({ token, previews, previewPort, away: awayFile(env), port }))
+  const server = http.createServer(phoneHandler({ token, previews, previewPort, away: awayFile(env), edge: edgeFile(env), port }))
   server.listen(port, host, () => console.log(`Agent Atrium phone door → http://${host}:${port}`))
   startPreviews({ root: previews, host, port: previewPort })
   return server

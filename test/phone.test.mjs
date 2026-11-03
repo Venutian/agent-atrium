@@ -9,6 +9,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { noteArrival, readAway } from '../server/lib/away.mjs'
+import { signPlay } from '../server/lib/edge.mjs'
 import { phoneHandler, startPhoneDoor, tokenMatches } from '../server/phone.mjs'
 
 const TOKEN = 'a'.repeat(40)
@@ -93,9 +94,14 @@ function paperclip({ calls = [] } = {}) {
   return { fetcher }
 }
 
-async function withDoor(run, { calls, away } = {}) {
+async function withDoor(run, { calls, away, edge, build } = {}) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'atrium-door-'))
   if (away) fs.writeFileSync(path.join(folder, 'away.json'), JSON.stringify(away))
+  if (edge) fs.writeFileSync(path.join(folder, 'edge.json'), JSON.stringify(edge))
+  if (build) {
+    fs.mkdirSync(path.join(folder, 'previews', build.key, 'site'), { recursive: true })
+    fs.writeFileSync(path.join(folder, 'previews', build.key, 'manifest.json'), JSON.stringify({ job: JOB, name: 'Baltis', ok: true, builtAt: '2026-11-03T10:00:00Z' }))
+  }
   const handler = phoneHandler({
     token: TOKEN,
     paperclip: paperclip({ calls }),
@@ -104,6 +110,7 @@ async function withDoor(run, { calls, away } = {}) {
     devices: path.join(folder, 'devices.json'),
     guard: folder,
     away: path.join(folder, 'away.json'),
+    edge: path.join(folder, 'edge.json'),
   })
   const server = http.createServer(handler)
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -432,12 +439,12 @@ const TUNNEL = { address: '10.88.0.1', phone: '10.88.0.2', port: 51820, interfac
 
 test('the app learns the tunnel address once away access is set up', async () => {
   await withDoor(async (ask) => {
-    assert.deepEqual((await ask('/v1/hello')).body, { away: null })
+    assert.equal((await ask('/v1/hello')).body.away, null)
     assert.equal((await ask('/v1/hello', { token: 'wrong' })).status, 401)
     assert.equal((await ask('/v1/devices')).body.away, null)
   })
   await withDoor(async (ask) => {
-    assert.deepEqual((await ask('/v1/hello')).body, { away: '10.88.0.1:5288' })
+    assert.equal((await ask('/v1/hello')).body.away, '10.88.0.1:5288')
     assert.deepEqual((await ask('/v1/devices')).body.away, { address: '10.88.0.1', up: false, changed: false })
     assert.ok(!(await ask('/v1/summary')).body.needsYou.some((item) => /address changed/.test(item.title)))
   }, { away: TUNNEL })
@@ -446,7 +453,7 @@ test('the app learns the tunnel address once away access is set up', async () =>
 test('a tunnel address outside the private ranges is ignored', async () => {
   for (const address of ['8.8.8.8', '127.0.0.1', 'evil.example', '10.0.0.1:80']) {
     await withDoor(async (ask) => {
-      assert.deepEqual((await ask('/v1/hello')).body, { away: null })
+      assert.equal((await ask('/v1/hello')).body.away, null)
     }, { away: { ...TUNNEL, address } })
   }
 })
@@ -467,4 +474,42 @@ test('a changed home address asks the owner to update the phone, until the phone
   noteArrival(file, '::ffff:10.88.0.2')
   assert.equal(readAway(file).changed, false)
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).phoneEndpoint, '83.9.9.9')
+})
+
+const EDGE = { studio: 'studio.example.org', play: 'play.example.org', gate: 'c'.repeat(64) }
+const VIA_EDGE = (client) => ({ 'x-ngen-edge': '1', 'x-ngen-client': client })
+
+test('a device with a key learns the Cloudflare address and its gate, and nothing without a key', async () => {
+  await withDoor(async (ask) => {
+    assert.equal((await ask('/v1/hello')).body.edge, null)
+  })
+  await withDoor(async (ask) => {
+    assert.deepEqual((await ask('/v1/hello')).body.edge, { host: 'https://studio.example.org', gate: EDGE.gate })
+    assert.equal((await ask('/v1/hello', { token: '' })).body.edge, undefined)
+  }, { edge: EDGE })
+  for (const broken of [{ ...EDGE, gate: 'short' }, { ...EDGE, studio: 'evil host' }, { ...EDGE, play: '' }]) {
+    await withDoor(async (ask) => {
+      assert.equal((await ask('/v1/hello')).body.edge, null)
+    }, { edge: broken })
+  }
+})
+
+test('build links through Cloudflare are signed for that build alone', async () => {
+  const key = 'a1'.repeat(16)
+  await withDoor(async (ask) => {
+    const direct = (await ask(`/v1/jobs/${JOB}`)).body.previews[0].url
+    assert.match(direct, new RegExp(`^http://127\\.0\\.0\\.1:\\d+/open/${key}$`))
+    const cloud = (await ask(`/v1/jobs/${JOB}`, { headers: VIA_EDGE('90.1.2.3') })).body.previews[0].url
+    assert.equal(cloud, `https://play.example.org/open/${key}?g=${signPlay(EDGE.gate, key)}`)
+    assert.notEqual(signPlay(EDGE.gate, key), signPlay(EDGE.gate, 'b2'.repeat(16)))
+  }, { edge: EDGE, build: { key } })
+})
+
+test('through Cloudflare, wrong keys lock out that phone and not every phone', async () => {
+  await withDoor(async (ask) => {
+    for (let i = 0; i < 10; i += 1) assert.equal((await ask('/v1/hello', { token: 'wrong', headers: VIA_EDGE('90.1.2.3') })).status, 401)
+    assert.equal((await ask('/v1/hello', { headers: VIA_EDGE('90.1.2.3') })).status, 429)
+    assert.equal((await ask('/v1/hello', { headers: VIA_EDGE('90.9.9.9') })).status, 200)
+    assert.equal((await ask('/v1/hello')).status, 200)
+  }, { edge: EDGE })
 })

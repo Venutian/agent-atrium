@@ -173,3 +173,12 @@ service in between, and WireGuard does not answer a packet without the phone's k
 and Cloudflare Tunnel were set aside because each needs an account; Tor because every request
 would take seconds. The door only reads the tunnel's address from `away/away.json` and hands it
 to the app; it never sets the tunnel up and never touches the router.
+
+A second way in, added the same day at the owner's request, needs nothing on the phone: a
+Cloudflare Tunnel with no public address, reached only by one Worker over Workers VPC. The Worker
+turns away any request without a gate secret before it reaches the PC, and accepts a build link
+only with the door's signature for that build. The door hands the gate to devices that already
+hold a key, reads `edge.json` for it, and counts wrong keys against the phone's address the
+Worker passes on, since every request through the tunnel arrives from loopback. Cloudflare can
+read this traffic, so WireGuard stays as the private way, and the app prefers home Wi-Fi, then
+WireGuard, then Cloudflare.
