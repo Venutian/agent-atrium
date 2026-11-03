@@ -51,6 +51,9 @@ function paperclip({ calls = [] } = {}) {
       ])
     }
     if (path === `/issues/${JOB}/live-runs`) return json([{ id: 'run1', agentId: 'bot', status: 'running' }])
+    if (path === `/issues/${JOB}/attachments`) return json([{ id: QUESTION, contentType: 'image/png', originalFilename: 'hud.png' }, { id: 'x', contentType: 'application/zip' }])
+    if (path === `/attachments/${QUESTION}/content`) return new Response(Buffer.from('png'), { headers: { 'Content-Type': 'image/png' } })
+    if (path === `/attachments/${REQUEST}/content`) return new Response('<script>', { headers: { 'Content-Type': 'text/html' } })
     if (path === '/heartbeat-runs/run1/cancel') return json({})
     if (path.startsWith('/companies/co/heartbeat-runs')) return json([{ id: 'old', issueId: JOB, agentId: 'bot', status: 'failed', error: 'Tests failed' }])
     if (path.startsWith(`/issues/${JOB}/interactions/${QUESTION}/`)) return json({})
@@ -321,4 +324,21 @@ test('a new job can name its project, bot and priority', async () => {
     assert.equal((await ask('/v1/jobs', { method: 'POST', body: { title: 'x', botId: QUESTION } })).status, 400)
     assert.equal((await ask('/v1/jobs', { method: 'POST', body: { title: 'x', priority: 'urgent' } })).status, 400)
   }, { calls })
+})
+
+test('a job lists only image proof, and images come through as images', async () => {
+  await withDoor(async (ask) => {
+    const { body } = await ask(`/v1/jobs/${JOB}`)
+    assert.deepEqual(body.proof, [{ id: QUESTION, name: 'hud.png' }])
+    assert.equal(body.changes, null)
+    assert.deepEqual(body.previews, [])
+    assert.equal((await ask('/v1/proof/not-an-id')).status, 400)
+    assert.equal((await ask(`/v1/proof/${REQUEST}`)).status, 415)
+  })
+})
+
+test('a job with no branch has no changes to read', async () => {
+  await withDoor(async (ask) => {
+    assert.equal((await ask(`/v1/jobs/${JOB}/changes`)).status, 404)
+  })
 })

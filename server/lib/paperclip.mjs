@@ -27,6 +27,8 @@ const PRIORITIES = new Set(['critical', 'high', 'medium', 'low'])
 const FAILED_RUNS = new Set(['failed', 'timed_out'])
 const SHOWN_RUNS = 50
 const MAX_ANSWERS = 20
+const PROOF_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+const MAX_PROOF_BYTES = 12 * 1024 * 1024
 
 export class PaperclipError extends Error {
   constructor(status, message) {
@@ -215,11 +217,12 @@ function runView(runs, live, names) {
 
 export async function jobDetail(jobId, options) {
   if (!ID.test(jobId)) throw new PaperclipError(400, 'That is not a job id')
-  const [issue, comments, interactions, live] = await Promise.all([
+  const [issue, comments, interactions, live, attachments] = await Promise.all([
     call(`/issues/${jobId}`, options),
     call(`/issues/${jobId}/comments`, options),
     orElse(call(`/issues/${jobId}/interactions`, options), []),
     orElse(call(`/issues/${jobId}/live-runs`, options), []),
+    orElse(call(`/issues/${jobId}/attachments`, options), []),
   ])
   const [agents, runs, projects] = await Promise.all([
     call(`/companies/${issue.companyId}/agents`, options),
@@ -232,6 +235,7 @@ export async function jobDetail(jobId, options) {
     description: issue.description || '',
     run: runView(runs.filter((r) => r.issueId === jobId), live, names),
     questions: interactions.filter((i) => i.status === 'pending').map(questionView).filter(Boolean),
+    proof: attachments.filter((a) => PROOF_TYPES.has(a.contentType)).map((a) => ({ id: a.id, name: a.originalFilename || 'Screenshot' })),
     comments: comments.map((c) => ({
       id: c.id,
       from: authorOf(c, names),
@@ -346,6 +350,32 @@ export async function decideApproval(approvalId, decision, note, options) {
   const decisionNote = typeof note === 'string' ? note.trim().slice(0, MAX_TEXT) : ''
   await call(`/approvals/${approvalId}/${decision}`, { ...options, method: 'POST', body: decisionNote ? { decisionNote } : {} })
   return { ok: true }
+}
+
+/** Where a job's work lives, from Paperclip's own record. Null when it never had a workspace. */
+export async function jobWorkspace(jobId, options) {
+  if (!ID.test(jobId)) throw new PaperclipError(400, 'That is not a job id')
+  const issue = await call(`/issues/${jobId}`, options)
+  if (!issue.executionWorkspaceId) return null
+  const workspace = await orElse(call(`/execution-workspaces/${issue.executionWorkspaceId}`, options), null)
+  return workspace && { cwd: workspace.cwd, branch: workspace.branchName, base: workspace.baseRef }
+}
+
+/** One screenshot's bytes. Only plain image types pass, so nothing a browser would run can come through here. */
+export async function proofImage(attachmentId, { fetcher = fetch } = {}) {
+  if (!ID.test(attachmentId)) throw new PaperclipError(400, 'That is not an image id')
+  let res
+  try {
+    res = await fetcher(`${BASE}/api/attachments/${attachmentId}/content`, { method: 'GET', signal: AbortSignal.timeout(TIME_LIMIT_MS) })
+  } catch {
+    throw new PaperclipError(503, 'Paperclip is not running on this machine')
+  }
+  if (!res.ok) throw new PaperclipError(res.status, `Paperclip answered ${res.status}`)
+  const type = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+  if (!PROOF_TYPES.has(type)) throw new PaperclipError(415, 'That file is not an image')
+  const bytes = Buffer.from(await res.arrayBuffer())
+  if (bytes.length > MAX_PROOF_BYTES) throw new PaperclipError(413, 'That image is too large')
+  return { type, bytes }
 }
 
 /** Stops whatever is running on a job now. The job stays open, so a comment can start it again. */

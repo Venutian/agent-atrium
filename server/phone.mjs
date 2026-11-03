@@ -12,10 +12,12 @@
 import http from 'node:http'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
+import { changeCounts, changeDetail } from './lib/changes.mjs'
 import {
   PaperclipError, acceptQuestion, addComment, addJob, answerQuestion, cancelJob, chatList, chatThread, decideApproval,
-  jobDetail, pauseBot, rejectQuestion, reopenJob, resumeBot, sendChat, stopJob, studioSummary,
+  jobDetail, jobWorkspace, pauseBot, proofImage, rejectQuestion, reopenJob, resumeBot, sendChat, stopJob, studioSummary,
 } from './lib/paperclip.mjs'
+import { PREVIEW_PORT, listPreviews, previewRoot, startPreviews } from './lib/previews.mjs'
 import { scanThreads } from './scan.mjs'
 
 const MIN_TOKEN = 32
@@ -43,6 +45,22 @@ function send(res, status, body) {
   res.end(payload)
 }
 
+function sendImage(res, { type, bytes }) {
+  res.writeHead(200, {
+    'Content-Type': type,
+    'Content-Length': bytes.length,
+    'Cache-Control': 'private, max-age=3600',
+    'X-Content-Type-Options': 'nosniff',
+  })
+  res.end(bytes)
+}
+
+/** The address the app reached this PC on, so links it gets back work from wherever it is. */
+const hostOf = (req) => {
+  const host = (req.headers.host || '').replace(/:\d+$/, '')
+  return /^[\w.-]+$/.test(host) ? host : '127.0.0.1'
+}
+
 async function readBody(req) {
   const chunks = []
   let size = 0
@@ -68,7 +86,7 @@ async function liveSessions() {
     .map((t) => ({ title: t.title || 'Session', harness: t.harness, project: t.project || t.cwdName || '' }))
 }
 
-export function phoneHandler({ token, paperclip = {}, sessions = liveSessions }) {
+export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, previews = previewRoot(), previewPort = PREVIEW_PORT }) {
   const failures = new Map()
   const options = paperclip.fetcher ? { fetcher: paperclip.fetcher } : undefined
 
@@ -100,6 +118,8 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions })
     const { pathname } = new URL(req.url, 'http://phone')
     const job = /^\/v1\/jobs\/([^/]+)$/.exec(pathname)
     const comment = /^\/v1\/jobs\/([^/]+)\/comments$/.exec(pathname)
+    const changes = /^\/v1\/jobs\/([^/]+)\/changes$/.exec(pathname)
+    const proof = /^\/v1\/proof\/([^/]+)$/.exec(pathname)
     const jobAction = /^\/v1\/jobs\/([^/]+)\/(stop|cancel|reopen)$/.exec(pathname)
     const question = /^\/v1\/jobs\/([^/]+)\/questions\/([^/]+)\/(respond|accept|reject)$/.exec(pathname)
     const botAction = /^\/v1\/bots\/([^/]+)\/(pause|resume)$/.exec(pathname)
@@ -114,7 +134,19 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions })
       if (pathname === '/v1/jobs' && req.method === 'POST') {
         return send(res, 201, await addJob(await readBody(req), options))
       }
-      if (job && req.method === 'GET') return send(res, 200, await jobDetail(job[1], options))
+      if (job && req.method === 'GET') {
+        const [detail, workspace, builds] = await Promise.all([
+          jobDetail(job[1], options),
+          jobWorkspace(job[1], options),
+          listPreviews(job[1], { root: previews, host: hostOf(req), port: previewPort }),
+        ])
+        return send(res, 200, { ...detail, changes: await changeCounts(workspace ?? undefined), previews: builds })
+      }
+      if (changes && req.method === 'GET') {
+        const detail = await changeDetail((await jobWorkspace(changes[1], options)) ?? undefined)
+        return detail ? send(res, 200, detail) : send(res, 404, { error: 'This job has no branch to read' })
+      }
+      if (proof && req.method === 'GET') return sendImage(res, await proofImage(proof[1], options))
       if (comment && req.method === 'POST') {
         const body = await readBody(req)
         return send(res, 201, await addComment(comment[1], body.text, options))
@@ -153,8 +185,11 @@ export function startPhoneDoor(env = process.env) {
   }
   const host = env.AGENT_ATRIUM_PHONE_HOST || '127.0.0.1'
   const port = Number(env.AGENT_ATRIUM_PHONE_PORT) || 5288
-  const server = http.createServer(phoneHandler({ token }))
+  const previews = previewRoot(env)
+  const previewPort = Number(env.AGENT_ATRIUM_PREVIEW_PORT) || PREVIEW_PORT
+  const server = http.createServer(phoneHandler({ token, previews, previewPort }))
   server.listen(port, host, () => console.log(`Agent Atrium phone door → http://${host}:${port}`))
+  startPreviews({ root: previews, host, port: previewPort })
   return server
 }
 
