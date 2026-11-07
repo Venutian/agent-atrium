@@ -21,6 +21,34 @@ So archiving is the atrium's own bookkeeping now. The bot walks back to receptio
 as before, and archiving in the harness's own UI still sends it home too, because the scan reads
 that flag. `setArchived` is not part of the adapter interface and adding one back is a bug.
 
+## The office API stays on this machine; the phone gets its own door
+
+`server/phone.mjs` is a second server with a short list of named actions, and the office API is
+not reachable through it. Opening the office API to the network would have been less code, but
+that API can start sessions and run commands, and the reason it answers only its own page is that
+nothing on it was designed to face another device.
+
+The door proxies nothing. Each action is written out, every Paperclip record is reduced to the
+fields the phone shows, and a new action means a new line here rather than a wider pattern. It
+refuses any request with an Origin header, because the app sends none and browsers always do.
+Paperclip itself stays on loopback: this door is the only thing that talks to it from outside.
+
+The door keeps two things of its own beside its settings in `~/.config/agent-atrium`: `devices.json`,
+which holds a hash of each device's key, and `guard.json`, the token limit. Neither touches a
+harness, and neither belongs in `data/atrium.json`, which the office server writes from another
+process. "`data/atrium.json` is the only file this project writes" is about the office.
+
+Two things it reads go a little further than Paperclip's records. Reading a job's changes runs git,
+with the folder and branch taken from Paperclip and every setting that could start a program pinned
+off, because bots can write to those repositories. Playable builds are plain files that a script
+left on disk, served from a separate port with no token: the link's key is the secret, and a build
+may only load its own files. Tapping Play runs nothing, and a preview cannot reach the door because
+the door refuses any request with an Origin header.
+
+The token comes from the environment, because `data/atrium.json` is the only file this project
+writes. Adding a job, a comment, an approval decision or a chat message are the only writes, each
+one a person asking by name, and they go to Paperclip's API rather than to any harness's store.
+
 ## Nothing is read from or executed inside another application's bundle
 
 Only files under the user's own home directory.
@@ -136,3 +164,21 @@ without knowing about it and pick their uniforms up from the material prototype'
 has to call `withCurve(shader)` itself — otherwise its uniforms are zero, it stays flat, and
 it floats above the ground that bent away under it. Same for a custom depth material, or its
 shadow stays flat while it does not.
+
+## Away from home goes through WireGuard, not an open door
+
+The phone door speaks plain HTTP with a bearer token, so its port is never opened to the
+internet. The phone reaches it through a WireGuard tunnel to the PC instead: no account and no
+service in between, and WireGuard does not answer a packet without the phone's key. Tailscale
+and Cloudflare Tunnel were set aside because each needs an account; Tor because every request
+would take seconds. The door only reads the tunnel's address from `away/away.json` and hands it
+to the app; it never sets the tunnel up and never touches the router.
+
+A second way in, added the same day at the owner's request, needs nothing on the phone: a
+Cloudflare Tunnel with no public address, reached only by one Worker over Workers VPC. The Worker
+turns away any request without a gate secret before it reaches the PC, and accepts a build link
+only with the door's signature for that build. The door hands the gate to devices that already
+hold a key, reads `edge.json` for it, and counts wrong keys against the phone's address the
+Worker passes on, since every request through the tunnel arrives from loopback. Cloudflare can
+read this traffic, so WireGuard stays as the private way, and the app prefers home Wi-Fi, then
+WireGuard, then Cloudflare.

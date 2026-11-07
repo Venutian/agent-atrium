@@ -330,6 +330,28 @@ Every agent that is installed shows up at once. To add a new one in code, see
   dark the talk thins out. It is on, but silent until your first click, as browsers require.
   To use your own recordings, see [public/audio/README.md](public/audio/README.md).
 
+## The phone door
+
+If you run [Paperclip](https://github.com/paperclipai/paperclip) on this machine, a phone app can
+add jobs, read their updates, answer approvals and bots' questions, stop a run, cancel or reopen a
+job and pause a bot through a small separate server. It is off until you start it, and it needs a
+token of at least 32 characters:
+
+```bash
+AGENT_ATRIUM_PHONE_TOKEN="$(openssl rand -hex 32)" AGENT_ATRIUM_PHONE_HOST=0.0.0.0 npm run phone
+```
+
+It listens on port 5288, and serves playable builds of finished jobs on port 5290 if a script
+leaves them in `~/.config/agent-atrium/previews`. Keep both on a network you trust: the token is
+the only thing protecting the door, and plain HTTP does not hide it from others on the same Wi-Fi.
+For use away from home, put the door behind a WireGuard tunnel rather than opening its port. If
+`~/.config/agent-atrium/away/away.json` names the PC's private address in that tunnel, the door
+hands it to the app at `/v1/hello`, and the app tries both addresses and keeps whichever answers.
+If `~/.config/agent-atrium/edge.json` names a Cloudflare address and gate, `/v1/hello` hands
+those over too, for a Worker that guards a tunnel with no public address of its own. The
+office page and its API stay on this machine either way. `AGENT_ATRIUM_PAPERCLIP_URL` and
+`AGENT_ATRIUM_PAPERCLIP_COMPANY` point it at a different Paperclip or company.
+
 ## Credits and licence
 
 Agent Atrium is a fork of [Bot Crossing](https://github.com/Station-Sciences/bot-crossing) by
