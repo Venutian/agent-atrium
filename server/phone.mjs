@@ -17,6 +17,7 @@ import { changeCounts, changeDetail } from './lib/changes.mjs'
 import { cameThroughEdge, edgeFile, readEdge, signPlay } from './lib/edge.mjs'
 import { addDevice, deviceView, devicesFile, findDevice, readDevices, retireShared, revokeDevice, touchDevice } from './lib/devices.mjs'
 import { guardFolder, readGuard, writeGuard } from './lib/guard.mjs'
+import { readPlans } from './lib/plans.mjs'
 import {
   PaperclipError, acceptQuestion, addComment, addJob, addRoutine, answerQuestion, cancelJob, chatList, chatThread, decideApproval,
   jobDetail, jobWorkspace, pauseBot, pauseRoutine, proofImage, rejectQuestion, removeRoutine, reopenJob, resumeBot, resumeRoutine,
@@ -164,14 +165,14 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
         })
       }
       if (pathname === '/v1/summary' && req.method === 'GET') {
-        const [summary, live] = await Promise.all([studioSummary(options), sessions()])
+        const [summary, live, plans] = await Promise.all([studioSummary(options), sessions(), readPlans()])
         const limits = readGuard(guard)
         const tunnel = readAway(away)
         const notices = [
           ...(limits.tripped ? [{ kind: 'blocked', id: '', title: 'Claude bots are paused', detail: 'The token guard stopped them at your limit. Raise it or turn it off in Studio.' }] : []),
           ...(tunnel?.changed ? [{ kind: 'blocked', id: '', title: 'Your home internet address changed', detail: `Away access needs it. In the WireGuard app, edit the nGen tunnel and set Endpoint to ${tunnel.endpoint}:${tunnel.port}.` }] : []),
         ]
-        return send(res, 200, { ...summary, needsYou: [...notices, ...summary.needsYou], sessions: live, guard: limits })
+        return send(res, 200, { ...summary, needsYou: [...notices, ...summary.needsYou], sessions: live, guard: limits, plans })
       }
       if (pathname === '/v1/jobs' && req.method === 'POST') {
         return send(res, 201, await addJob(await readBody(req), options))

@@ -179,11 +179,28 @@ export async function studioSummary(options) {
   }
 }
 
+/** The crew's scripts post with the owner's board identity and sign with this, so they are not shown as the owner. */
+const SCRIPT_MARK = /\n*<!-- ngen-script: ([^>]+?) -->\s*$/
+// Messages the scripts posted before they signed them, known by their fixed wording.
+const OLD_SCRIPT = [
+  [/^The crew check found \d+ thing/, 'Crew check'],
+  [/is stuck on .+ Read its comments and act now/s, 'Review guard'],
+  [/ is finished\. Critic's verdict:/, 'Review guard'],
+  [/You own every session: check it with sessions\.py list/, 'Review guard'],
+]
+const scriptOf = (body = '') => body.match(SCRIPT_MARK)?.[1] || OLD_SCRIPT.find(([rx]) => rx.test(body))?.[1]
+
 /** Who wrote a comment, as the phone should show it. */
 function authorOf(comment, names) {
   if (comment.authorType === 'system') return 'Paperclip'
+  const script = comment.authorType === 'user' && scriptOf(comment.body)
+  if (script) return script
   return comment.authorAgentId ? names.get(comment.authorAgentId) || 'A bot' : 'You'
 }
+
+/** Whether the owner wrote it, and its words without a script's signature. */
+const mineOf = (comment) => comment.authorType === 'user' && !scriptOf(comment.body)
+const textOf = (comment) => (comment.body || '').replace(SCRIPT_MARK, '')
 
 /** A question a bot is waiting on, in the two forms the app can answer. Other kinds stay in Paperclip. */
 function questionView(interaction) {
@@ -254,7 +271,7 @@ export async function jobDetail(jobId, options) {
     comments: comments.map((c) => ({
       id: c.id,
       from: authorOf(c, names),
-      text: c.body || '',
+      text: textOf(c),
       at: c.createdAt,
     })),
   }
@@ -265,7 +282,7 @@ async function lastSaid(chat, options) {
   if (!chat) return null
   const comments = await call(`/issues/${chat.id}/comments?limit=${PREVIEW_LOOKBACK}`, options)
   const said = comments.find((c) => c.authorType !== 'system')
-  return said ? { text: (said.body || '').slice(0, PREVIEW_CHARS), mine: said.authorType === 'user', at: said.createdAt } : null
+  return said ? { text: textOf(said).slice(0, PREVIEW_CHARS), mine: mineOf(said), at: said.createdAt } : null
 }
 
 /** Everyone you can talk to, with whether a conversation has started. */
@@ -304,7 +321,7 @@ export async function chatThread(botId, options) {
     bot,
     working: chat.conversationState === 'active',
     messages: comments
-      .map((c) => ({ id: c.id, from: authorOf(c, names), mine: c.authorType === 'user', text: c.body || '', at: c.createdAt }))
+      .map((c) => ({ id: c.id, from: authorOf(c, names), mine: mineOf(c), text: textOf(c), at: c.createdAt }))
       .reverse(),
   }
 }
