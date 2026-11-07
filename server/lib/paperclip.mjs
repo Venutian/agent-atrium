@@ -144,6 +144,27 @@ function dayReport({ issues, names, projects, spend, now = Date.now() }) {
   }
 }
 
+/**
+ * Questions bots asked in their chats. Paperclip's attention feed leaves chats out, so without this a
+ * choice Tony put to the owner never reached "Needs you". One card per chat; it opens the cards to answer.
+ */
+async function chatQuestions(id, names, options) {
+  const chats = await orElse(call(`/companies/${id}/chats`, options), [])
+  const asked = await Promise.all(chats.map(async (chat) => {
+    const pending = (await orElse(call(`/issues/${chat.id}/interactions`, options), []))
+      .filter((i) => i.status === 'pending').map(questionView).filter(Boolean)
+    if (!pending.length) return null
+    const bot = names.get(chat.conversationAgentId) || 'A bot'
+    return {
+      kind: 'question',
+      id: chat.id,
+      title: pending.length === 1 ? pending[0].title : `${bot} has ${pending.length} questions for you`,
+      detail: pending.length === 1 ? `${bot} asked in chat` : pending.map((q) => q.title).join('\n'),
+    }
+  }))
+  return asked.filter(Boolean)
+}
+
 /** Everything the phone's first screen needs, in one call. */
 export async function studioSummary(options) {
   const id = await companyId(options)
@@ -160,6 +181,8 @@ export async function studioSummary(options) {
     orElse(call(`/companies/${id}/costs/window-spend`, options), []),
   ])
   const names = new Map(agents.map((a) => [a.id, a.name]))
+  const asked = needsYou({ approvals, attention: attention?.items || [], issues, names, failedRuns: badges?.failedRuns || 0 })
+  const inChats = (await chatQuestions(id, names, options)).filter((q) => !asked.some((a) => a.id === q.id))
   const projectNames = new Map(projects.map((p) => [p.id, p.name]))
   const view = (issue) => jobView(issue, names, projectNames)
   const liveAgents = new Set(live.map((run) => run.agentId))
@@ -168,7 +191,7 @@ export async function studioSummary(options) {
     company: company.name,
     bots: agents.map((a) => botView(a, liveAgents)),
     projects: projects.map((p) => ({ id: p.id, name: p.name })),
-    needsYou: needsYou({ approvals, attention: attention?.items || [], issues, names, failedRuns: badges?.failedRuns || 0 }),
+    needsYou: [...inChats, ...asked],
     running: byNewest.filter((i) => RUNNING.has(i.status)).map(view),
     queued: byNewest.filter((i) => QUEUED.has(i.status)).map(view),
     finished: byNewest.filter((i) => FINISHED.has(i.status)).slice(0, SHOWN_DONE).map(view),
@@ -215,7 +238,7 @@ function questionView(interaction) {
         prompt: q.prompt,
         multiple: q.selectionMode === 'multi',
         required: Boolean(q.required),
-        options: (q.options || []).map((o) => ({ id: o.id, label: o.label, hint: o.description || '' })),
+        options: (q.options || []).filter((o) => !o.freeText).map((o) => ({ id: o.id, label: o.label, hint: o.description || '' })),
       })),
     }
   }
