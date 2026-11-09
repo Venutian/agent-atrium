@@ -21,6 +21,7 @@ const QUEUED = new Set(['backlog', 'todo'])
 const FINISHED = new Set(['done', 'cancelled'])
 const SHOWN_DONE = 10
 const SHOWN_MESSAGES = 100
+const SHOWN_UPDATES = 30
 const PREVIEW_LOOKBACK = 5
 const PREVIEW_CHARS = 140
 const PRIORITIES = new Set(['critical', 'high', 'medium', 'low'])
@@ -274,7 +275,9 @@ export async function jobDetail(jobId, options) {
   if (!ID.test(jobId)) throw new PaperclipError(400, 'That is not a job id')
   const [issue, comments, interactions, live, attachments] = await Promise.all([
     call(`/issues/${jobId}`, options),
-    call(`/issues/${jobId}/comments`, options),
+    // Newest first. Tony's chat once sent 600 updates (550 KB) every 20 seconds, and the phone was too busy
+    // drawing them to take a tap on a question card.
+    call(`/issues/${jobId}/comments?limit=${SHOWN_UPDATES}`, options),
     orElse(call(`/issues/${jobId}/interactions`, options), []),
     orElse(call(`/issues/${jobId}/live-runs`, options), []),
     orElse(call(`/issues/${jobId}/attachments`, options), []),
