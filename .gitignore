@@ -26,3 +26,4 @@ public/audio/*
 !public/audio/README.md
 public/dev-mobile.html
 .gstack/
+.paperclip/

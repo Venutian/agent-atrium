@@ -25,9 +25,9 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 
 function paperclip({ calls = [] } = {}) {
   const agents = [
-    { id: 'lead', name: 'Tony', title: 'Studio director', role: 'ceo', status: 'idle', spentMonthlyCents: 120, adapterConfig: { model: 'claude-sonnet-5-5', cwd: '/secret', env: { KEY: 'hidden' } } },
-    { id: 'bot', name: 'Scout', role: 'qa', status: 'idle', adapterConfig: { model: 'gpt-6-luna' } },
-    { id: BOT, name: 'Critic', title: 'Reviewer', role: 'qa', status: 'idle', adapterConfig: { model: 'gpt-6.1-sol', cwd: '/secret' } },
+    { id: 'lead', name: 'Tony', title: 'Studio director', role: 'ceo', status: 'idle', spentMonthlyCents: 120, adapterType: 'claude_local', adapterConfig: { model: 'claude-sonnet-5-5', cwd: '/secret', env: { KEY: 'hidden' } } },
+    { id: 'bot', name: 'Scout', role: 'qa', status: 'idle', adapterType: 'codex_local', adapterConfig: { model: 'gpt-6-luna' } },
+    { id: BOT, name: 'Critic', title: 'Reviewer', role: 'qa', status: 'idle', adapterType: 'codex_local', adapterConfig: { model: 'gpt-6.1-sol', cwd: '/secret' } },
   ]
   const issues = [
     { id: JOB, identifier: 'NGE-1', title: 'Fix the map', status: 'in_progress', assigneeAgentId: 'bot', lastActivityAt: '2026-11-02T10:00:00Z', companyId: 'co' },
@@ -94,8 +94,12 @@ function paperclip({ calls = [] } = {}) {
   return { fetcher }
 }
 
-async function withDoor(run, { calls, away, edge, build } = {}) {
+async function withDoor(run, { calls, away, edge, build, crew } = {}) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'atrium-door-'))
+  if (crew) {
+    fs.mkdirSync(path.join(folder, 'crew'))
+    for (const [name, content] of Object.entries(crew)) fs.writeFileSync(path.join(folder, 'crew', name), typeof content === 'string' ? content : JSON.stringify(content))
+  }
   if (away) fs.writeFileSync(path.join(folder, 'away.json'), JSON.stringify(away))
   if (edge) fs.writeFileSync(path.join(folder, 'edge.json'), JSON.stringify(edge))
   if (build) {
@@ -111,6 +115,8 @@ async function withDoor(run, { calls, away, edge, build } = {}) {
     guard: folder,
     away: path.join(folder, 'away.json'),
     edge: path.join(folder, 'edge.json'),
+    crew: path.join(folder, 'crew'),
+    plans: async () => ({ claude: { week: 0.4, resets: 1_794_589_200 }, codex: null, backup: null }),
   })
   const server = http.createServer(handler)
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -198,6 +204,28 @@ test('the summary lists what needs you and leaves configuration out', async () =
     assert.equal(JSON.stringify(body).includes('/secret'), false)
     assert.equal(JSON.stringify(body).includes('hidden'), false)
   })
+})
+
+test('the models screen reads every bot\'s model and the free list, and leaves configuration out', async () => {
+  const crew = {
+    'setup-bots.py': "FREE = [('opencode/deepseek-v4.1-flash-free', 'deepseek', 'strong'), ('opencode/beam-free', 'beam', 'light')]\n",
+    'free-out.json': { 'opencode/beam-free': { until: Math.floor(Date.now() / 1000) + 3600, error: 'did not answer' } },
+    'fallback.log': '2026-11-10 01:21 Fred moved from opencode/deepseek-v4.1-flash-free to opencode/beam-free\n',
+  }
+  await withDoor(async (ask) => {
+    assert.equal((await ask('/v1/models', { token: 'wrong' })).status, 401)
+    assert.equal((await ask('/v1/models', { method: 'POST', body: {} })).status, 404)
+    const { status, body } = await ask('/v1/models')
+    assert.equal(status, 200)
+    assert.deepEqual(body.bots.map((b) => [b.name, b.label, b.where, b.status]), [['Critic', 'GPT 6.1 Sol', 'Codex', 'idle'], ['Scout', 'GPT 6 Luna', 'Codex', 'idle'], ['Tony', 'Sonnet 5.5', 'Claude', 'idle']])
+    assert.deepEqual(body.free.map((m) => [m.label, m.state]), [['DeepSeek V4.1 Flash, free', 'unchecked'], ['Beam, free', 'aside']])
+    assert.equal(body.subscriptions.claude.week, 0.4)
+    assert.equal(body.switches[0].text, 'Fred moved from DeepSeek V4.1 Flash, free to Beam, free')
+    assert.equal(body.health.tone, 'warn')
+    assert.equal(JSON.stringify(body).includes('/secret'), false)
+    assert.equal(JSON.stringify(body).includes('hidden'), false)
+    assert.equal(JSON.stringify(body).includes('setup-bots'), false)
+  }, { crew })
 })
 
 test('a new job goes to the director and a bad one is refused', async () => {

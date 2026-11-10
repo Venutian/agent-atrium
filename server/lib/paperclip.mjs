@@ -555,3 +555,16 @@ export async function rejectQuestion(jobId, questionId, reason, options) {
   await call(questionPath(jobId, questionId, 'reject'), { ...options, method: 'POST', body: note ? { reason: note } : {} })
   return { ok: true }
 }
+
+/** Each bot with the model it runs on now, and nothing else of its configuration. */
+export async function agentModels(options) {
+  const id = await companyId(options)
+  const agents = await call(`/companies/${id}/agents`, options)
+  return agents.map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    status: agent.status,
+    model: typeof agent.adapterConfig?.model === 'string' ? agent.adapterConfig.model : '',
+    adapter: typeof agent.adapterType === 'string' ? agent.adapterType : '',
+  }))
+}
