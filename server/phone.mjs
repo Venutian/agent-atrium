@@ -38,11 +38,6 @@ const ROUTINE_ACTIONS = { run: runRoutine, pause: pauseRoutine, resume: resumeRo
 const SEEN_EVERY_MS = 60 * 1000
 const SESSIONS_TTL_MS = 60 * 1000
 const SESSIONS_WAIT_MS = 700
-/** The first screen's answers are served at once and refreshed behind the request. */
-const SUMMARY_TTL_MS = 20 * 1000
-const SUMMARY_WAIT_MS = 800
-const CHATS_TTL_MS = 20 * 1000
-const CHATS_WAIT_MS = 800
 
 const digest = (value) => createHash('sha256').update(String(value)).digest()
 const waitUpTo = (ms) => new Promise((resolve) => {
@@ -145,16 +140,10 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
 
   // The summary and the chat list are the phone's first screen. Paperclip can take a second or
   // more to answer them, so the door keeps the last answer and serves it at once, refreshing it
-  // behind the request. No /v1/ answer ever waits for Paperclip.
-  const summaryCache = { at: 0, value: null }
-  const chatsCache = { at: 0, value: null }
-  const waitFor = (ms) => new Promise((resolve) => { const timer = setTimeout(resolve, ms); timer.unref?.() })
-
-  const emptySummary = () => ({
-    company: '', bots: [], projects: [], needsYou: [], running: [], queued: [], finished: [],
-    usage: [], report: { finished: [], finishedCount: 0, tokens: [] }, spentCents: 0, at: Date.now(),
-    sessions: [], guard: { enabled: false, limit: 0, tripped: false, used: 0 }, plans: null,
-  })
+  // behind the request. The last good answer is never thrown away, and a door that has no answer
+  // yet waits for Paperclip rather than sending an empty studio.
+  const summaryCache = { at: 0, value: null, error: null, running: null }
+  const chatsCache = { at: 0, value: null, error: null, running: null }
 
   const buildSummary = async (options) => {
     const [summary, live, plans] = await Promise.all([studioSummary(options), recentSessions(), readPlans()])
@@ -165,30 +154,78 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
       ...(tunnel?.changed ? [{ kind: 'blocked', id: '', title: 'Your home internet address changed', detail: `Away access needs it. In the WireGuard app, edit the nGen tunnel and set Endpoint to ${tunnel.endpoint}:${tunnel.port}.` }] : []),
     ]
     const next = { ...summary, needsYou: [...notices, ...summary.needsYou], sessions: live, guard: limits, plans }
-    summaryCache.value = next
-    summaryCache.at = Date.now()
     return next
   }
 
-  const summarySoon = async (options) => {
-    const seen = summaryCache
-    if (seen.value && Date.now() - seen.at < SUMMARY_TTL_MS) {
-      buildSummary(options).catch(() => undefined)
-      return seen.value
-    }
-    const fresh = buildSummary(options).catch(() => undefined)
-    return Promise.race([fresh, waitFor(SUMMARY_WAIT_MS)]).then(() => seen.value || emptySummary())
+  /**
+   * Builds the phone's first screen and keeps the last good answer. A build that fails keeps that
+   * answer and says what went wrong, so the phone can tell "nothing is happening" from "Paperclip
+   * is down" instead of being shown an empty studio.
+   */
+  const refreshSummary = (options) => {
+    if (summaryCache.running) return summaryCache.running
+    summaryCache.running = buildSummary(options)
+      .then((next) => {
+        summaryCache.value = next
+        summaryCache.at = Date.now()
+        summaryCache.error = null
+        return next
+      })
+      .catch((err) => {
+        summaryCache.error = err?.message || 'Paperclip is not running on this machine'
+        throw err
+      })
+      .finally(() => { summaryCache.running = null })
+    return summaryCache.running
   }
 
+  const refreshChats = (options) => {
+    if (chatsCache.running) return chatsCache.running
+    chatsCache.running = chatList(options)
+      .then((bots) => {
+        chatsCache.value = { bots }
+        chatsCache.at = Date.now()
+        chatsCache.error = null
+        return chatsCache.value
+      })
+      .catch((err) => {
+        chatsCache.error = err?.message || 'Paperclip is not running on this machine'
+        throw err
+      })
+      .finally(() => { chatsCache.running = null })
+    return chatsCache.running
+  }
+
+  /**
+   * The summary, at once when the door has an answer, and after Paperclip answers when it has
+   * not: an empty studio is worse than a slow one. A door with no answer yet and a Paperclip that
+   * is down answers with the error, as the door always did.
+   */
+  const summarySoon = async (options) => {
+    const seen = summaryCache
+    if (seen.value) {
+      refreshSummary(options).catch(() => undefined)
+      return seen.error ? { ...seen.value, error: seen.error } : seen.value
+    }
+    return refreshSummary(options)
+  }
+
+  /** The chat list, the same way: at once when there is one, the error when there is not. */
   const chatsSoon = async (options) => {
     const seen = chatsCache
-    if (seen.value && Date.now() - seen.at < CHATS_TTL_MS) {
-      chatList(options).then((bots) => { chatsCache.value = { bots }; chatsCache.at = Date.now() }, () => undefined)
-      return seen.value
+    if (seen.value) {
+      refreshChats(options).catch(() => undefined)
+      return seen.error ? { ...seen.value, error: seen.error } : seen.value
     }
-    const fresh = chatList(options).then((bots) => { chatsCache.value = { bots }; chatsCache.at = Date.now(); return { bots } }, () => undefined)
-    return Promise.race([fresh, waitFor(CHATS_WAIT_MS)]).then(() => seen.value || { bots: [] })
+    return refreshChats(options)
   }
+
+  // Warm the phone's first screen, the way the session scan is warmed, so the first request after
+  // a restart is answered from cache instead of waiting for Paperclip.
+  const warmed = Promise.all([
+    refreshSummary(options).catch(() => undefined),
+    refreshChats(options).catch(() => undefined),
+  ])
 
   const lockedOut = (ip) => {
     const entry = failures.get(ip)
@@ -205,7 +242,7 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
     failures.set(ip, entry)
   }
 
-  return async (req, res) => {
+  const handler = async (req, res) => {
     // Through Cloudflare every request comes from this PC's tunnel, so wrong keys count against the
     // phone's own address, which the Worker passes on.
     const viaEdge = cameThroughEdge(req)
@@ -327,6 +364,9 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
       return send(res, status >= 400 && status < 600 ? status : 502, { error: err.message || 'Something went wrong' })
     }
   }
+  // The warm-up of the first screen, so a caller can wait for the door to be ready.
+  handler.warmed = warmed
+  return handler
 }
 
 export function startPhoneDoor(env = process.env) {
