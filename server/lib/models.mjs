@@ -20,7 +20,7 @@ const LOG_LINE = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}) (.*)$/
 /** Known facts about each free provider's limits, as text: none of them publish live counters. */
 export const PROVIDER_LIMITS = [
   { provider: 'OpenCode Zen free models', note: 'No key needed. Limits are not published; a model over its limit stops answering until it is tried again an hour later.' },
-  { provider: 'OpenRouter free models', note: '50 requests a day, shared by every model on the key.' },
+  { provider: 'OpenRouter free models', note: '1,000 requests a day, shared by every model on the key.' },
   { provider: 'NVIDIA', note: '40 requests a minute on the key.' },
 ]
 
