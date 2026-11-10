@@ -23,7 +23,7 @@ const ROUTINE = 'bbbbbbbb-cccc-4ddd-8eee-555555555555'
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status })
 
-function paperclip({ calls = [] } = {}) {
+function paperclip({ calls = [], attentionDelay = 0 } = {}) {
   const agents = [
     { id: 'lead', name: 'Tony', title: 'Studio director', role: 'ceo', status: 'idle', spentMonthlyCents: 120, adapterConfig: { model: 'claude-sonnet-5-5', cwd: '/secret', env: { KEY: 'hidden' } } },
     { id: 'bot', name: 'Scout', role: 'qa', status: 'idle', adapterConfig: { model: 'gpt-6-luna' } },
@@ -37,6 +37,9 @@ function paperclip({ calls = [] } = {}) {
   const fetcher = async (url, init) => {
     const path = new URL(url).pathname.replace('/api', '') + new URL(url).search
     calls.push({ path, method: init.method, body: init.body && JSON.parse(init.body) })
+    if (attentionDelay && path === '/companies/co/attention') {
+      await new Promise((resolve) => setTimeout(resolve, attentionDelay))
+    }
     if (path === '/companies') return json([{ id: 'co', status: 'active' }])
     if (path === '/companies/co') return json({ name: 'nGen Labs' })
     if (path === '/companies/co/agents') return json(agents)
@@ -76,7 +79,7 @@ function paperclip({ calls = [] } = {}) {
     if (path === '/companies/co/live-runs') return json([{ agentId: 'bot' }])
     if (path === `/issues/${JOB}`) return json({ ...issues[0], description: 'Details' })
     if (path === `/issues/${JOB}/comments` && init.method === 'POST') return json({ id: 'c2' }, 201)
-    if (path === `/issues/${JOB}/comments`) return json([{ id: 'c1', authorAgentId: 'bot', body: 'Working on it' }, { id: 'c0', body: 'Please do this' }])
+    if (path.startsWith(`/issues/${JOB}/comments`)) return json([{ id: 'c1', authorAgentId: 'bot', body: 'Working on it' }, { id: 'c0', body: 'Please do this' }])
     if (path === `/approvals/${APPROVAL}/approve`) return json({})
     if (path === '/companies/co/chats') return json([{ id: 'chat', conversationAgentId: BOT, lastActivityAt: '2026-11-02T10:00:00Z' }])
     if (path === `/agents/${BOT}`) return json(agents[2])
@@ -94,7 +97,7 @@ function paperclip({ calls = [] } = {}) {
   return { fetcher }
 }
 
-async function withDoor(run, { calls, away, edge, build } = {}) {
+async function withDoor(run, { calls, away, edge, build, sessions, attentionDelay } = {}) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'atrium-door-'))
   if (away) fs.writeFileSync(path.join(folder, 'away.json'), JSON.stringify(away))
   if (edge) fs.writeFileSync(path.join(folder, 'edge.json'), JSON.stringify(edge))
@@ -104,8 +107,8 @@ async function withDoor(run, { calls, away, edge, build } = {}) {
   }
   const handler = phoneHandler({
     token: TOKEN,
-    paperclip: paperclip({ calls }),
-    sessions: async () => [{ title: 'Aldis build', harness: 'claude-code', project: 'aldis' }],
+    paperclip: paperclip({ calls, attentionDelay }),
+    sessions: sessions || (async () => [{ title: 'Aldis build', harness: 'claude-code', project: 'aldis' }]),
     previews: path.join(folder, 'previews'),
     devices: path.join(folder, 'devices.json'),
     guard: folder,
@@ -198,6 +201,57 @@ test('the summary lists what needs you and leaves configuration out', async () =
     assert.equal(JSON.stringify(body).includes('/secret'), false)
     assert.equal(JSON.stringify(body).includes('hidden'), false)
   })
+})
+
+test('a slow session scan never holds up the summary', async () => {
+  let scans = 0
+  const started = Date.now()
+  await withDoor(async (ask) => {
+    const { status, body } = await ask('/v1/summary')
+    assert.equal(status, 200)
+    assert.deepEqual(body.sessions, [])
+    const elapsed = Date.now() - started
+    assert.ok(elapsed < 2500, `the summary waited ${elapsed} ms for the scan`)
+  }, { sessions: () => { scans += 1; return new Promise(() => {}) } })
+  assert.equal(scans, 1)
+})
+
+test('the summary scans sessions once, then serves the remembered list', async () => {
+  let scans = 0
+  await withDoor(async (ask) => {
+    const first = await ask('/v1/summary')
+    assert.deepEqual(first.body.sessions.map((s) => s.project), ['aldis'])
+    const second = await ask('/v1/summary')
+    assert.deepEqual(second.body.sessions.map((s) => s.project), ['aldis'])
+  }, {
+    sessions: async () => {
+      scans += 1
+      return [{ title: 'Aldis build', harness: 'claude-code', project: 'aldis' }]
+    },
+  })
+  assert.equal(scans, 1)
+})
+
+test('a scan that fails leaves the summary standing', async () => {
+  await withDoor(async (ask) => {
+    const { status, body } = await ask('/v1/summary')
+    assert.equal(status, 200)
+    assert.deepEqual(body.sessions, [])
+  }, { sessions: async () => { throw new Error('no harness') } })
+})
+
+test('a slow attention feed does not hold the summary past a second', async () => {
+  const started = Date.now()
+  await withDoor(async (ask) => {
+    const first = await ask('/v1/summary')
+    assert.equal(first.status, 200)
+    assert.equal(first.body.needsYou.some((n) => n.kind === 'question'), false)
+    assert.ok(Date.now() - started < 1800, `the first summary waited ${Date.now() - started} ms`)
+    // The feed lands behind the request; the next call inside its TTL serves it.
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    const second = await ask('/v1/summary')
+    assert.equal(second.body.needsYou.some((n) => n.kind === 'question'), true)
+  }, { attentionDelay: 1100 })
 })
 
 test('a new job goes to the director and a bad one is refused', async () => {

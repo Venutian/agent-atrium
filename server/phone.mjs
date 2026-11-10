@@ -35,8 +35,14 @@ const JOB_ACTIONS = { stop: stopJob, cancel: cancelJob, reopen: reopenJob }
 const BOT_ACTIONS = { pause: pauseBot, resume: resumeBot }
 const ROUTINE_ACTIONS = { run: runRoutine, pause: pauseRoutine, resume: resumeRoutine, remove: removeRoutine }
 const SEEN_EVERY_MS = 60 * 1000
+const SESSIONS_TTL_MS = 60 * 1000
+const SESSIONS_WAIT_MS = 700
 
 const digest = (value) => createHash('sha256').update(String(value)).digest()
+const waitUpTo = (ms) => new Promise((resolve) => {
+  const timer = setTimeout(resolve, ms)
+  timer.unref?.()
+})
 
 export function tokenMatches(header, token) {
   const given = /^Bearer (.+)$/.exec(header || '')?.[1]
@@ -102,6 +108,35 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
   const seen = new Map()
   const options = paperclip.fetcher ? { fetcher: paperclip.fetcher } : undefined
 
+  // The office-wide thread scan walks every transcript on this PC, and here that is hundreds of
+  // files: over 18 seconds on 10 November. The phone's first screen only needs the dozen sessions
+  // that are running, so the door keeps the last answer and refreshes it behind the request. No
+  // /v1/ answer ever waits for the scan.
+  const scans = { at: 0, list: null, running: null }
+  const scanSessions = () => {
+    if (scans.running) return scans.running
+    scans.running = Promise.resolve()
+      .then(() => sessions())
+      .then((list) => {
+        scans.at = Date.now()
+        scans.list = list
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        scans.running = null
+      })
+    return scans.running
+  }
+  const recentSessions = async () => {
+    const current = scans.list && Date.now() - scans.at < SESSIONS_TTL_MS
+    const running = current ? null : scanSessions()
+    if (scans.list) return scans.list
+    if (running) await Promise.race([running, waitUpTo(SESSIONS_WAIT_MS)])
+    return scans.list || []
+  }
+  // Warm it, so the first summary after a door restart does not go without the list.
+  scanSessions()
+
   const lockedOut = (ip) => {
     const entry = failures.get(ip)
     if (!entry) return false
@@ -165,7 +200,7 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
         })
       }
       if (pathname === '/v1/summary' && req.method === 'GET') {
-        const [summary, live, plans] = await Promise.all([studioSummary(options), sessions(), readPlans()])
+        const [summary, live, plans] = await Promise.all([studioSummary(options), recentSessions(), readPlans()])
         const limits = readGuard(guard)
         const tunnel = readAway(away)
         const notices = [
