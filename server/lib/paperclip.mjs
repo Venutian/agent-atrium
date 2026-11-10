@@ -84,9 +84,32 @@ const botView = (agent, liveAgents) => ({
   spentCents: agent.spentMonthlyCents || 0,
 })
 
+// Paperclip numbers every job NGE-n, whatever it is for. The owner reads them by project instead, with the
+// same number, so BAL-313 and NGE-313 are one job and the bots' own references still match.
+const PROJECT_CODES = [
+  [/baltis/i, 'BAL'], [/aldis/i, 'ALD'], [/fasten/i, 'FAS'], [/untired/i, 'UNT'],
+  [/website/i, 'WEB'], [/night rules/i, 'NR'], [/studio/i, 'STU'], [/sandbox/i, 'BOX'],
+]
+const codes = new Map()
+
+/** The job's project code and number, as the phone shows it. Ballotta jobs share Baltis's project. */
+export function refOf(issue, projects = new Map()) {
+  const number = (issue.identifier || '').match(/-(\d+)$/)?.[1]
+  if (!number) return issue.identifier || ''
+  const project = projects.get(issue.projectId) || ''
+  const code = (/ballotta/i.test(issue.title || '') && /baltis/i.test(project) ? 'BLT'
+    : PROJECT_CODES.find(([rx]) => rx.test(project))?.[1]) || 'CREW'
+  const ref = `${code}-${number}`
+  codes.set(issue.identifier, ref)
+  return ref
+}
+
+/** A message with every job reference it names in the phone's form; link targets keep Paperclip's. */
+const withRefs = (text) => text.replace(/(?<![\/\w])([A-Z]{2,6}-\d+)(?![-\w])/g, (ref) => codes.get(ref) || ref)
+
 const jobView = (issue, names, projects = new Map()) => ({
   id: issue.id,
-  ref: issue.identifier || '',
+  ref: refOf(issue, projects),
   title: issue.title,
   status: issue.status,
   bot: names.get(issue.assigneeAgentId) || '',
@@ -99,11 +122,11 @@ const jobView = (issue, names, projects = new Map()) => ({
 const attentionView = (item, kind) => ({
   kind,
   id: item.subject?.metadata?.issueId || '',
-  title: item.subject?.title || item.whyNow || 'Needs a look',
-  detail: item.whyNow || '',
+  title: withRefs(item.subject?.title || item.whyNow || 'Needs a look'),
+  detail: withRefs(item.whyNow || ''),
 })
 
-function needsYou({ approvals, attention, issues, names, failedRuns }) {
+function needsYou({ approvals, attention, issues, names, projects, failedRuns }) {
   const items = approvals.map((a) => ({
     kind: 'approval',
     id: a.id,
@@ -117,7 +140,7 @@ function needsYou({ approvals, attention, issues, names, failedRuns }) {
       items.push({
         kind: issue.status === 'blocked' ? 'blocked' : 'review',
         id: issue.id,
-        title: `${issue.identifier || ''} ${issue.title}`.trim(),
+        title: `${refOf(issue, projects)} ${issue.title}`.trim(),
         detail: names.get(issue.assigneeAgentId) || '',
       })
     }
@@ -143,7 +166,7 @@ function dayReport({ issues, names, projects, spend, now = Date.now() }) {
   const since = now - REPORT_MS
   const finished = issues.filter((i) => i.status === 'done' && Date.parse(i.completedAt || i.updatedAt || 0) >= since)
   return {
-    finished: finished.slice(0, SHOWN_DONE).map((i) => ({ id: i.id, ref: i.identifier || '', title: i.title, bot: names.get(i.assigneeAgentId) || '', project: projects.get(i.projectId) || '' })),
+    finished: finished.slice(0, SHOWN_DONE).map((i) => ({ id: i.id, ref: refOf(i, projects), title: i.title, bot: names.get(i.assigneeAgentId) || '', project: projects.get(i.projectId) || '' })),
     finishedCount: finished.length,
     tokens: usageView(spend.filter((row) => row.window === '24h')),
   }
@@ -223,9 +246,10 @@ export async function studioSummary(options) {
     orElse(call(`/companies/${id}/costs/window-spend`, options), []),
   ])
   const names = new Map(agents.map((a) => [a.id, a.name]))
-  const asked = needsYou({ approvals, attention: attention?.items || [], issues, names, failedRuns: badges?.failedRuns || 0 })
-  const inChats = (await chatQuestions(id, names, options)).filter((q) => !asked.some((a) => a.id === q.id))
   const projectNames = new Map(projects.map((p) => [p.id, p.name]))
+  for (const issue of issues) refOf(issue, projectNames)
+  const asked = needsYou({ approvals, attention: attention?.items || [], issues, names, projects: projectNames, failedRuns: badges?.failedRuns || 0 })
+  const inChats = (await chatQuestions(id, names, options)).filter((q) => !asked.some((a) => a.id === q.id))
   const view = (issue) => jobView(issue, names, projectNames)
   const liveAgents = new Set(live.map((run) => run.agentId))
   const byNewest = [...issues].sort((a, b) => String(b.lastActivityAt || '').localeCompare(String(a.lastActivityAt || '')))
@@ -265,7 +289,7 @@ function authorOf(comment, names) {
 
 /** Whether the owner wrote it, and its words without a script's signature. */
 const mineOf = (comment) => comment.authorType === 'user' && !scriptOf(comment.body)
-const textOf = (comment) => (comment.body || '').replace(SCRIPT_MARK, '')
+const textOf = (comment) => withRefs((comment.body || '').replace(SCRIPT_MARK, ''))
 
 /** A question a bot is waiting on, in the two forms the app can answer. Other kinds stay in Paperclip. */
 function questionView(interaction) {

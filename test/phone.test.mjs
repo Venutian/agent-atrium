@@ -200,7 +200,7 @@ test('the summary lists what needs you and leaves configuration out', async () =
     assert.equal(body.needsYou[1].id, JOB)
     assert.deepEqual(body.projects, [{ id: PROJECT, name: 'Baltis' }])
     assert.deepEqual(body.usage, [{ provider: 'anthropic', window: '7d', tokens: 120, cachedTokens: 900 }])
-    assert.deepEqual(body.running.map((j) => [j.ref, j.bot]), [['NGE-1', 'Scout']])
+    assert.deepEqual(body.running.map((j) => [j.ref, j.bot]), [['CREW-1', 'Scout']])
     assert.equal(body.bots.find((b) => b.name === 'Scout').status, 'running')
     assert.equal(body.spentCents, 321)
     assert.deepEqual(body.sessions.map((s) => s.project), ['aldis'])
