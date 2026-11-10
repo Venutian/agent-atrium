@@ -23,7 +23,7 @@ const ROUTINE = 'bbbbbbbb-cccc-4ddd-8eee-555555555555'
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status })
 
-function paperclip({ calls = [], attentionDelay = 0 } = {}) {
+function paperclip({ calls = [], attentionDelay = 0, chatDelay = 0, summaryDelay = 0, state = {} } = {}) {
   const agents = [
     { id: 'lead', name: 'Tony', title: 'Studio director', role: 'ceo', status: 'idle', spentMonthlyCents: 120, adapterType: 'claude_local', adapterConfig: { model: 'claude-sonnet-5-5', cwd: '/secret', env: { KEY: 'hidden' } } },
     { id: 'bot', name: 'Scout', role: 'qa', status: 'idle', adapterType: 'codex_local', adapterConfig: { model: 'gpt-6-luna' } },
@@ -37,8 +37,16 @@ function paperclip({ calls = [], attentionDelay = 0 } = {}) {
   const fetcher = async (url, init) => {
     const path = new URL(url).pathname.replace('/api', '') + new URL(url).search
     calls.push({ path, method: init.method, body: init.body && JSON.parse(init.body) })
+    // The machine running Paperclip is off: every call fails, the way it does when the service is down.
+    if (state.down) throw new Error('Paperclip is not running on this machine')
     if (attentionDelay && path === '/companies/co/attention') {
       await new Promise((resolve) => setTimeout(resolve, attentionDelay))
+    }
+    if (chatDelay && path === '/companies/co/chats') {
+      await new Promise((resolve) => setTimeout(resolve, chatDelay))
+    }
+    if (summaryDelay && path === '/companies/co/agents') {
+      await new Promise((resolve) => setTimeout(resolve, summaryDelay))
     }
     if (path === '/companies') return json([{ id: 'co', status: 'active' }])
     if (path === '/companies/co') return json({ name: 'nGen Labs' })
@@ -97,7 +105,7 @@ function paperclip({ calls = [], attentionDelay = 0 } = {}) {
   return { fetcher }
 }
 
-async function withDoor(run, { calls, away, edge, build, sessions, attentionDelay, crew } = {}) {
+async function withDoor(run, { calls, away, edge, build, sessions, attentionDelay, chatDelay, summaryDelay, crew, state = {}, warm = true } = {}) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'atrium-door-'))
   if (crew) {
     fs.mkdirSync(path.join(folder, 'crew'))
@@ -111,7 +119,7 @@ async function withDoor(run, { calls, away, edge, build, sessions, attentionDela
   }
   const handler = phoneHandler({
     token: TOKEN,
-    paperclip: paperclip({ calls, attentionDelay }),
+    paperclip: paperclip({ calls, attentionDelay, chatDelay, summaryDelay, state }),
     sessions: sessions || (async () => [{ title: 'Aldis build', harness: 'claude-code', project: 'aldis' }]),
     previews: path.join(folder, 'previews'),
     devices: path.join(folder, 'devices.json'),
@@ -123,6 +131,10 @@ async function withDoor(run, { calls, away, edge, build, sessions, attentionDela
   })
   const server = http.createServer(handler)
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  // The door warms the phone's first screen when it starts, so wait for that: a test that counts
+  // Paperclip's calls then counts only the calls it makes itself. A test that wants the cold door
+  // asks for `warm: false` and gets the answer before the warm has finished.
+  if (warm) await handler.warmed
   const base = `http://127.0.0.1:${server.address().port}`
   const ask = (path, { token = TOKEN, method = 'GET', body, headers = {} } = {}) => new Promise((resolve, reject) => {
     const req = http.request(`${base}${path}`, {
@@ -158,19 +170,23 @@ test('tokenMatches needs the exact token in a bearer header', () => {
 test('a missing or wrong token is refused before anything else happens', async () => {
   const calls = []
   await withDoor(async (ask) => {
+    // The door warms the phone's first screen when it starts, so this counts the calls the
+    // refused request made, not the ones the warm made.
+    const before = calls.length
     assert.equal((await ask('/v1/summary', { token: null })).status, 401)
     assert.equal((await ask('/v1/summary', { token: 'wrong' })).status, 401)
+    assert.equal(calls.length, before)
   }, { calls })
-  assert.equal(calls.length, 0)
 })
 
 test('a web page is refused even with the right token', async () => {
   const calls = []
   await withDoor(async (ask) => {
+    const before = calls.length
     const res = await ask('/v1/summary', { headers: { Origin: 'https://example.com' } })
     assert.equal(res.status, 403)
+    assert.equal(calls.length, before)
   }, { calls })
-  assert.equal(calls.length, 0)
 })
 
 test('guessing locks the address out, and the right token does not get past that', async () => {
@@ -183,12 +199,13 @@ test('guessing locks the address out, and the right token does not get past that
 test('only the named actions exist', async () => {
   const calls = []
   await withDoor(async (ask) => {
+    const before = calls.length
     for (const path of ['/', '/api/threads', '/v1', '/v1/companies', '/v1/../api/companies', '/v1/agents/lead/heartbeat/invoke']) {
       assert.equal((await ask(path)).status, 404, path)
     }
     assert.equal((await ask('/v1/summary', { method: 'POST', body: {} })).status, 404)
+    assert.equal(calls.length, before)
   }, { calls })
-  assert.equal(calls.length, 0)
 })
 
 test('the summary lists what needs you and leaves configuration out', async () => {
@@ -247,12 +264,14 @@ test('a scan that fails leaves the summary standing', async () => {
 })
 
 test('a slow attention feed does not hold the summary past a second', async () => {
-  const started = Date.now()
   await withDoor(async (ask) => {
+    const started = Date.now()
     const first = await ask('/v1/summary')
     assert.equal(first.status, 200)
     assert.equal(first.body.needsYou.some((n) => n.kind === 'question'), false)
-    assert.ok(Date.now() - started < 1800, `the first summary waited ${Date.now() - started} ms`)
+    // The answer comes from the cache the door warmed when it started, so the slow feed is never
+    // waited for.
+    assert.ok(Date.now() - started < 500, `the first summary waited ${Date.now() - started} ms`)
     await new Promise((resolve) => setTimeout(resolve, 600))
     // The cached answer is served at once; the refreshed answer lands on the next call.
     await ask('/v1/summary')
@@ -267,10 +286,10 @@ test('the summary is served at once without waiting for Paperclip, then refreshe
     const started = Date.now()
     const first = await ask('/v1/summary')
     assert.equal(first.status, 200)
-    assert.ok(Date.now() - started < 1500, `the first summary took ${Date.now() - started} ms`)
+    assert.ok(Date.now() - started < 500, `the first summary took ${Date.now() - started} ms`)
     const second = await ask('/v1/summary')
     assert.equal(second.status, 200)
-    assert.ok(Date.now() - started < 1500, `the cached summary took ${Date.now() - started} ms`)
+    assert.ok(Date.now() - started < 500, `the cached summary took ${Date.now() - started} ms`)
     // The background refresh lands on the next call after Paperclip has answered.
     await new Promise((resolve) => setTimeout(resolve, 4000))
     await ask('/v1/summary')
@@ -286,12 +305,63 @@ test('the chat list is served at once and refreshed behind the request', async (
     const started = Date.now()
     const first = await ask('/v1/chats')
     assert.equal(first.status, 200)
+    // The answer is at once, and it still carries the bots: a fast answer with nothing in it is
+    // an empty studio, which is worse than a slow one.
     assert.deepEqual(first.body.bots.map((b) => b.name), ['Tony', 'Scout', 'Critic'])
-    assert.ok(Date.now() - started < 1500, `the first chat list took ${Date.now() - started} ms`)
+    assert.ok(Date.now() - started < 500, `the first chat list took ${Date.now() - started} ms`)
     const second = await ask('/v1/chats')
     assert.equal(second.status, 200)
     assert.deepEqual(second.body.bots.map((b) => b.name), ['Tony', 'Scout', 'Critic'])
-  })
+  }, { chatDelay: 900 })
+})
+
+test('a slow Paperclip still gives the phone the bots and the company', async () => {
+  // The door has no answer yet and Paperclip takes longer than the old one-second wait, so the
+  // phone waits for the answer rather than being shown an empty studio.
+  await withDoor(async (ask) => {
+    const first = await ask('/v1/summary')
+    assert.equal(first.status, 200)
+    assert.equal(first.body.company, 'nGen Labs')
+    assert.deepEqual(first.body.bots.map((b) => b.name), ['Tony', 'Scout', 'Critic'])
+    assert.deepEqual(first.body.needsYou.map((n) => n.kind), ['approval', 'question', 'blocked', 'failed'])
+  }, { warm: false, summaryDelay: 1200 })
+})
+
+test('a slow Paperclip still gives the phone the bots in the chat list', async () => {
+  await withDoor(async (ask) => {
+    const first = await ask('/v1/chats')
+    assert.equal(first.status, 200)
+    assert.deepEqual(first.body.bots.map((b) => b.name), ['Tony', 'Scout', 'Critic'])
+  }, { warm: false, chatDelay: 1200 })
+})
+
+test('a Paperclip that is down is answered with the error, not an empty studio', async () => {
+  await withDoor(async (ask) => {
+    const first = await ask('/v1/summary')
+    assert.ok(first.status >= 400, `the summary answered ${first.status}`)
+    assert.match(first.body.error, /Paperclip/)
+    const chats = await ask('/v1/chats')
+    assert.ok(chats.status >= 400, `the chat list answered ${chats.status}`)
+    assert.match(chats.body.error, /Paperclip/)
+  }, { state: { down: true } })
+})
+
+test('the last good answer is kept, and the door says what went wrong', async () => {
+  const state = { down: false }
+  await withDoor(async (ask) => {
+    const good = await ask('/v1/summary')
+    assert.equal(good.status, 200)
+    assert.deepEqual(good.body.bots.map((b) => b.name), ['Tony', 'Scout', 'Critic'])
+    state.down = true
+    // The next call refreshes behind the request and finds Paperclip down.
+    await ask('/v1/summary')
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    const after = await ask('/v1/summary')
+    assert.equal(after.status, 200)
+    // The studio is still there, and the phone is told what went wrong.
+    assert.deepEqual(after.body.bots.map((b) => b.name), ['Tony', 'Scout', 'Critic'])
+    assert.match(after.body.error, /Paperclip/)
+  }, { state })
 })
 
 test('the models screen reads every bot\'s model and the free list, and leaves configuration out', async () => {
