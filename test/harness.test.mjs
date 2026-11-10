@@ -135,8 +135,12 @@ async function scanWith(home) {
 }
 
 test('a CLI-only Codex session is found with no database at all', async () => {
+  // Its own checkout, so the answer does not depend on whatever git repository happens to sit
+  // above the machine's temp folder.
+  const project = await fsp.mkdtemp(path.join(os.tmpdir(), 'codex-project-'))
+  await fsp.mkdir(path.join(project, '.git'), { recursive: true })
   const home = await fakeCodex([
-    line('session_meta', { id: SESSION_ID, cwd: '/tmp/demo', git: { branch: 'main' } }),
+    line('session_meta', { id: SESSION_ID, cwd: project, git: { branch: 'main' } }),
     line('turn_context', { model: 'gpt-5.3-codex', effort: 'high' }),
     line('response_item', { type: 'message', role: 'user', content: [{ text: 'ship the thing' }] }),
     line('event_msg', { type: 'task_complete' }),
@@ -145,15 +149,16 @@ test('a CLI-only Codex session is found with no database at all', async () => {
   assert.equal(await h.detect(), true)
   const [t] = await h.scanThreads()
   assert.equal(t.id, `codex:${SESSION_ID}`, 'ids are prefixed')
-  assert.equal(t.project, 'demo')
+  assert.equal(t.project, path.basename(project))
   assert.equal(t.model, 'gpt-5.3-codex')
   assert.equal(t.effort, 'high')
   assert.equal(t.gitBranch, 'main')
   assert.equal(t.preview, 'ship the thing')
   assert.ok(t.sizeBytes > 0, 'sizeBytes is transcript bytes, not a token count')
   assert.equal(t.running, false)
-  assert.deepEqual(t.ref, { sessionId: SESSION_ID, cwd: '/tmp/demo', source: 'cli' }, 'ref carries the cwd and origin the session resumes in')
+  assert.deepEqual(t.ref, { sessionId: SESSION_ID, cwd: project, source: 'cli' }, 'ref carries the cwd and origin the session resumes in')
   await fsp.rm(home, { recursive: true, force: true })
+  await fsp.rm(project, { recursive: true, force: true })
 })
 
 test('an interrupted turn is not an error — escape must not redden a bot', async () => {

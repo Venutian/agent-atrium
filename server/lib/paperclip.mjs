@@ -29,6 +29,10 @@ const FAILED_RUNS = new Set(['failed', 'timed_out'])
 const SHOWN_RUNS = 50
 const MAX_ANSWERS = 20
 const REPORT_MS = 24 * 60 * 60 * 1000
+// Paperclip's attention feed took about a second on 10 November, and it is the slowest part of the
+// phone's first screen. The door keeps the last answer, so a refresh never waits longer than this.
+const ATTENTION_TTL_MS = 20_000
+const ATTENTION_WAIT_MS = 800
 const SCHEDULES = { nightly: '0 3 * * *', morning: '0 7 * * *', weekdays: '0 7 * * 1-5', weekly: '0 4 * * 1' }
 const TIMEZONE = /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/
 const PROOF_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
@@ -166,6 +170,43 @@ async function chatQuestions(id, names, options) {
   return asked.filter(Boolean)
 }
 
+const attentionSeen = new WeakMap()
+const attentionByCompany = new Map()
+const waitUpTo = (ms) => new Promise((resolve) => {
+  const timer = setTimeout(resolve, ms)
+  timer.unref?.()
+})
+
+/**
+ * Paperclip's attention feed, answered from the last result while a fresh one is fetched behind
+ * the request. The first call after a restart waits at most ATTENTION_WAIT_MS; every later one
+ * inside the TTL is instant, and a slow feed never holds the phone's first screen.
+ */
+function attentionSoon(id, options) {
+  // Keyed by the fetcher when a caller supplies one, so one door's tests cannot see another's
+  // remembered feed; on the real door it is one company and one cache.
+  const store = options?.fetcher ? attentionSeen : attentionByCompany
+  const key = options?.fetcher || id
+  const seen = store.get(key) || { at: 0, items: null, running: null }
+  store.set(key, seen)
+  const refresh = () => {
+    if (seen.running) return seen.running
+    seen.running = orElse(call(`/companies/${id}/attention`, options), { items: [] })
+      .then((value) => {
+        seen.at = Date.now()
+        seen.items = value
+      })
+      .finally(() => {
+        seen.running = null
+      })
+    return seen.running
+  }
+  if (seen.items && Date.now() - seen.at < ATTENTION_TTL_MS) return Promise.resolve(seen.items)
+  const running = refresh()
+  if (seen.items) return Promise.resolve(seen.items)
+  return Promise.race([running, waitUpTo(ATTENTION_WAIT_MS)]).then(() => seen.items || { items: [] })
+}
+
 /** Everything the phone's first screen needs, in one call. */
 export async function studioSummary(options) {
   const id = await companyId(options)
@@ -178,7 +219,7 @@ export async function studioSummary(options) {
     call(`/companies/${id}/sidebar-badges`, options),
     call(`/companies/${id}/live-runs`, options),
     orElse(call(`/companies/${id}/projects`, options), []),
-    orElse(call(`/companies/${id}/attention`, options), { items: [] }),
+    attentionSoon(id, options),
     orElse(call(`/companies/${id}/costs/window-spend`, options), []),
   ])
   const names = new Map(agents.map((a) => [a.id, a.name]))
