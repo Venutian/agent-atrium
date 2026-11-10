@@ -247,11 +247,45 @@ test('a slow attention feed does not hold the summary past a second', async () =
     assert.equal(first.status, 200)
     assert.equal(first.body.needsYou.some((n) => n.kind === 'question'), false)
     assert.ok(Date.now() - started < 1800, `the first summary waited ${Date.now() - started} ms`)
-    // The feed lands behind the request; the next call inside its TTL serves it.
     await new Promise((resolve) => setTimeout(resolve, 600))
-    const second = await ask('/v1/summary')
-    assert.equal(second.body.needsYou.some((n) => n.kind === 'question'), true)
+    // The cached answer is served at once; the refreshed answer lands on the next call.
+    await ask('/v1/summary')
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    const latest = await ask('/v1/summary')
+    assert.equal(latest.body.needsYou.some((n) => n.kind === 'question'), true)
   }, { attentionDelay: 1100 })
+})
+
+test('the summary is served at once without waiting for Paperclip, then refreshed behind it', async () => {
+  await withDoor(async (ask) => {
+    const started = Date.now()
+    const first = await ask('/v1/summary')
+    assert.equal(first.status, 200)
+    assert.ok(Date.now() - started < 1500, `the first summary took ${Date.now() - started} ms`)
+    const second = await ask('/v1/summary')
+    assert.equal(second.status, 200)
+    assert.ok(Date.now() - started < 1500, `the cached summary took ${Date.now() - started} ms`)
+    // The background refresh lands on the next call after Paperclip has answered.
+    await new Promise((resolve) => setTimeout(resolve, 4000))
+    await ask('/v1/summary')
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    const latest = await ask('/v1/summary')
+    assert.equal(latest.status, 200)
+    assert.equal(latest.body.needsYou.some((n) => n.kind === 'question'), true)
+  }, { attentionDelay: 2000 })
+})
+
+test('the chat list is served at once and refreshed behind the request', async () => {
+  await withDoor(async (ask) => {
+    const started = Date.now()
+    const first = await ask('/v1/chats')
+    assert.equal(first.status, 200)
+    assert.deepEqual(first.body.bots.map((b) => b.name), ['Tony', 'Scout', 'Critic'])
+    assert.ok(Date.now() - started < 1500, `the first chat list took ${Date.now() - started} ms`)
+    const second = await ask('/v1/chats')
+    assert.equal(second.status, 200)
+    assert.deepEqual(second.body.bots.map((b) => b.name), ['Tony', 'Scout', 'Critic'])
+  })
 })
 
 test('a new job goes to the director and a bad one is refused', async () => {

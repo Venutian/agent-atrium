@@ -37,6 +37,11 @@ const ROUTINE_ACTIONS = { run: runRoutine, pause: pauseRoutine, resume: resumeRo
 const SEEN_EVERY_MS = 60 * 1000
 const SESSIONS_TTL_MS = 60 * 1000
 const SESSIONS_WAIT_MS = 700
+/** The first screen's answers are served at once and refreshed behind the request. */
+const SUMMARY_TTL_MS = 20 * 1000
+const SUMMARY_WAIT_MS = 800
+const CHATS_TTL_MS = 20 * 1000
+const CHATS_WAIT_MS = 800
 
 const digest = (value) => createHash('sha256').update(String(value)).digest()
 const waitUpTo = (ms) => new Promise((resolve) => {
@@ -137,6 +142,53 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
   // Warm it, so the first summary after a door restart does not go without the list.
   scanSessions()
 
+  // The summary and the chat list are the phone's first screen. Paperclip can take a second or
+  // more to answer them, so the door keeps the last answer and serves it at once, refreshing it
+  // behind the request. No /v1/ answer ever waits for Paperclip.
+  const summaryCache = { at: 0, value: null }
+  const chatsCache = { at: 0, value: null }
+  const waitFor = (ms) => new Promise((resolve) => { const timer = setTimeout(resolve, ms); timer.unref?.() })
+
+  const emptySummary = () => ({
+    company: '', bots: [], projects: [], needsYou: [], running: [], queued: [], finished: [],
+    usage: [], report: { finished: [], finishedCount: 0, tokens: [] }, spentCents: 0, at: Date.now(),
+    sessions: [], guard: { enabled: false, limit: 0, tripped: false, used: 0 }, plans: null,
+  })
+
+  const buildSummary = async (options) => {
+    const [summary, live, plans] = await Promise.all([studioSummary(options), recentSessions(), readPlans()])
+    const limits = readGuard(guard)
+    const tunnel = readAway(away)
+    const notices = [
+      ...(limits.tripped ? [{ kind: 'blocked', id: '', title: 'Claude bots are paused', detail: 'The token guard stopped them at your limit. Raise it or turn it off in Studio.' }] : []),
+      ...(tunnel?.changed ? [{ kind: 'blocked', id: '', title: 'Your home internet address changed', detail: `Away access needs it. In the WireGuard app, edit the nGen tunnel and set Endpoint to ${tunnel.endpoint}:${tunnel.port}.` }] : []),
+    ]
+    const next = { ...summary, needsYou: [...notices, ...summary.needsYou], sessions: live, guard: limits, plans }
+    summaryCache.value = next
+    summaryCache.at = Date.now()
+    return next
+  }
+
+  const summarySoon = async (options) => {
+    const seen = summaryCache
+    if (seen.value && Date.now() - seen.at < SUMMARY_TTL_MS) {
+      buildSummary(options).catch(() => undefined)
+      return seen.value
+    }
+    const fresh = buildSummary(options).catch(() => undefined)
+    return Promise.race([fresh, waitFor(SUMMARY_WAIT_MS)]).then(() => seen.value || emptySummary())
+  }
+
+  const chatsSoon = async (options) => {
+    const seen = chatsCache
+    if (seen.value && Date.now() - seen.at < CHATS_TTL_MS) {
+      chatList(options).then((bots) => { chatsCache.value = { bots }; chatsCache.at = Date.now() }, () => undefined)
+      return seen.value
+    }
+    const fresh = chatList(options).then((bots) => { chatsCache.value = { bots }; chatsCache.at = Date.now(); return { bots } }, () => undefined)
+    return Promise.race([fresh, waitFor(CHATS_WAIT_MS)]).then(() => seen.value || { bots: [] })
+  }
+
   const lockedOut = (ip) => {
     const entry = failures.get(ip)
     if (!entry) return false
@@ -199,16 +251,7 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
           edge: cloud ? { host: `https://${cloud.studio}`, gate: cloud.gate } : null,
         })
       }
-      if (pathname === '/v1/summary' && req.method === 'GET') {
-        const [summary, live, plans] = await Promise.all([studioSummary(options), recentSessions(), readPlans()])
-        const limits = readGuard(guard)
-        const tunnel = readAway(away)
-        const notices = [
-          ...(limits.tripped ? [{ kind: 'blocked', id: '', title: 'Claude bots are paused', detail: 'The token guard stopped them at your limit. Raise it or turn it off in Studio.' }] : []),
-          ...(tunnel?.changed ? [{ kind: 'blocked', id: '', title: 'Your home internet address changed', detail: `Away access needs it. In the WireGuard app, edit the nGen tunnel and set Endpoint to ${tunnel.endpoint}:${tunnel.port}.` }] : []),
-        ]
-        return send(res, 200, { ...summary, needsYou: [...notices, ...summary.needsYou], sessions: live, guard: limits, plans })
-      }
+      if (pathname === '/v1/summary' && req.method === 'GET') return send(res, 200, await summarySoon(options))
       if (pathname === '/v1/jobs' && req.method === 'POST') {
         return send(res, 201, await addJob(await readBody(req), options))
       }
@@ -267,7 +310,7 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
         const body = await readBody(req)
         return send(res, 200, await decideApproval(decision[1], decision[2], body.note, options))
       }
-      if (pathname === '/v1/chats' && req.method === 'GET') return send(res, 200, { bots: await chatList(options) })
+      if (pathname === '/v1/chats' && req.method === 'GET') return send(res, 200, await chatsSoon(options))
       if (chat && req.method === 'GET') return send(res, 200, await chatThread(chat[1], options))
       if (chatMessage && req.method === 'POST') {
         const body = await readBody(req)
