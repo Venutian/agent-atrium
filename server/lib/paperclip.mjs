@@ -110,7 +110,7 @@ const withRefs = (text) => text.replace(/(?<![\/\w])([A-Z]{2,6}-\d+)(?![-\w])/g,
 const jobView = (issue, names, projects = new Map()) => ({
   id: issue.id,
   ref: refOf(issue, projects),
-  title: issue.title,
+  title: withRefs(issue.title),
   status: issue.status,
   bot: names.get(issue.assigneeAgentId) || '',
   project: projects.get(issue.projectId) || '',
@@ -140,7 +140,7 @@ function needsYou({ approvals, attention, issues, names, projects, failedRuns })
       items.push({
         kind: issue.status === 'blocked' ? 'blocked' : 'review',
         id: issue.id,
-        title: `${refOf(issue, projects)} ${issue.title}`.trim(),
+        title: `${refOf(issue, projects)} ${withRefs(issue.title)}`.trim(),
         detail: names.get(issue.assigneeAgentId) || '',
       })
     }
@@ -166,7 +166,7 @@ function dayReport({ issues, names, projects, spend, now = Date.now() }) {
   const since = now - REPORT_MS
   const finished = issues.filter((i) => i.status === 'done' && Date.parse(i.completedAt || i.updatedAt || 0) >= since)
   return {
-    finished: finished.slice(0, SHOWN_DONE).map((i) => ({ id: i.id, ref: refOf(i, projects), title: i.title, bot: names.get(i.assigneeAgentId) || '', project: projects.get(i.projectId) || '' })),
+    finished: finished.slice(0, SHOWN_DONE).map((i) => ({ id: i.id, ref: refOf(i, projects), title: withRefs(i.title), bot: names.get(i.assigneeAgentId) || '', project: projects.get(i.projectId) || '' })),
     finishedCount: finished.length,
     tokens: usageView(spend.filter((row) => row.window === '24h')),
   }
