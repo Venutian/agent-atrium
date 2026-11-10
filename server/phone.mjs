@@ -17,9 +17,10 @@ import { changeCounts, changeDetail } from './lib/changes.mjs'
 import { cameThroughEdge, edgeFile, readEdge, signPlay } from './lib/edge.mjs'
 import { addDevice, deviceView, devicesFile, findDevice, readDevices, retireShared, revokeDevice, touchDevice } from './lib/devices.mjs'
 import { guardFolder, readGuard, writeGuard } from './lib/guard.mjs'
+import { crewFolder, readModels } from './lib/models.mjs'
 import { readPlans } from './lib/plans.mjs'
 import {
-  PaperclipError, acceptQuestion, addComment, addJob, addRoutine, answerQuestion, cancelJob, chatList, chatThread, decideApproval,
+  PaperclipError, acceptQuestion, addComment, addJob, addRoutine, agentModels, answerQuestion, cancelJob, chatList, chatThread, decideApproval,
   jobDetail, jobWorkspace, pauseBot, pauseRoutine, proofImage, rejectQuestion, removeRoutine, reopenJob, resumeBot, resumeRoutine,
   routineList, runRoutine, sendChat, stopJob, studioSummary,
 } from './lib/paperclip.mjs'
@@ -108,7 +109,7 @@ async function liveSessions() {
     .map((t) => ({ title: t.title || 'Session', harness: t.harness, project: t.project || t.cwdName || '' }))
 }
 
-export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, previews = previewRoot(), previewPort = PREVIEW_PORT, devices = devicesFile(), guard = guardFolder(), away = awayFile(), edge = edgeFile(), port = 5288 }) {
+export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, previews = previewRoot(), previewPort = PREVIEW_PORT, devices = devicesFile(), guard = guardFolder(), away = awayFile(), edge = edgeFile(), port = 5288, crew = crewFolder(), plans = readPlans }) {
   const failures = new Map()
   const seen = new Map()
   const options = paperclip.fetcher ? { fetcher: paperclip.fetcher } : undefined
@@ -311,6 +312,10 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
         return send(res, 200, await decideApproval(decision[1], decision[2], body.note, options))
       }
       if (pathname === '/v1/chats' && req.method === 'GET') return send(res, 200, await chatsSoon(options))
+      if (pathname === '/v1/models' && req.method === 'GET') {
+        // Which model every bot runs on, the free models' health and the subscriptions: files and Paperclip only.
+        return send(res, 200, await readModels({ folder: crew, agents: () => agentModels(options), plans: await plans() }))
+      }
       if (chat && req.method === 'GET') return send(res, 200, await chatThread(chat[1], options))
       if (chatMessage && req.method === 'POST') {
         const body = await readBody(req)

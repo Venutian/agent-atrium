@@ -350,7 +350,10 @@ hands it to the app at `/v1/hello`, and the app tries both addresses and keeps w
 If `~/.config/agent-atrium/edge.json` names a Cloudflare address and gate, `/v1/hello` hands
 those over too, for a Worker that guards a tunnel with no public address of its own. The
 office page and its API stay on this machine either way. `AGENT_ATRIUM_PAPERCLIP_URL` and
-`AGENT_ATRIUM_PAPERCLIP_COMPANY` point it at a different Paperclip or company.
+`AGENT_ATRIUM_PAPERCLIP_COMPANY` point it at a different Paperclip or company. `/v1/models`
+tells the app which model each bot runs on, which free models answer or are set aside, and how much
+of each subscription is used, read from the crew's files in `~/.paperclip/ngen` (or `NGEN_CREW_FOLDER`)
+without running anything.
 
 ## Credits and licence
 
