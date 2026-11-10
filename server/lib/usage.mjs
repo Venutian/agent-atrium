@@ -2,6 +2,12 @@
 import { createReadStream } from 'node:fs'
 import fsp from 'node:fs/promises'
 
+/**
+ * How many transcripts keep their running totals. It has to hold every thread a scan reads: at 256,
+ * a machine with 525 Claude Code threads threw half of them out on every pass and read those files
+ * again from the first byte, five seconds a scan.
+ */
+const CACHED_FILES = 4096
 const cache = new Map()
 const pending = new Map()
 export const tokenNumber = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
@@ -150,7 +156,7 @@ async function read(file, kind) {
   } finally { await handle.close() }
   Object.assign(state, { mtime: stat.mtimeMs, size: stat.size, ino: stat.ino })
   cache.delete(key); cache.set(key, state)
-  while (cache.size > 256) cache.delete(cache.keys().next().value)
+  while (cache.size > CACHED_FILES) cache.delete(cache.keys().next().value)
   return snapshot(state)
 }
 

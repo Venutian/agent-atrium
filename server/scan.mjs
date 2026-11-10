@@ -75,6 +75,13 @@ export function disambiguateProjects(threads) {
 }
 
 /**
+ * A thread nobody named is titled by its first prompt, and a bot's first prompt is its whole brief:
+ * 873 threads came to 7.5 MB of titles, sent to the page every 15 seconds. A sign has room for a line.
+ */
+const TITLE_MAX = 160
+const shortTitle = (title) => (typeof title === 'string' && title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1).trimEnd()}…` : title)
+
+/**
  * Every thread from every detected harness.
  *
  * A harness that throws is skipped rather than allowed to take the scan down with it: one
@@ -87,7 +94,7 @@ export async function scanThreads() {
     harnesses.map(async (h) => {
       try {
         const threads = await h.scanThreads()
-        return threads.map((t) => ({ ...t, harness: h.id, harnessName: h.name }))
+        return threads.map((t) => ({ ...t, title: shortTitle(t.title), harness: h.id, harnessName: h.name }))
       } catch (err) {
         console.warn(`agent-atrium: harness "${h.id}" failed to scan —`, err?.message || err)
         return []

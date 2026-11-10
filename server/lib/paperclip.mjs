@@ -105,7 +105,7 @@ export function refOf(issue, projects = new Map()) {
 }
 
 /** A message with every job reference it names in the phone's form; link targets keep Paperclip's. */
-const withRefs = (text) => text.replace(/(?<![\/\w])([A-Z]{2,6}-\d+)(?![-\w])/g, (ref) => codes.get(ref) || ref)
+export const withRefs = (text) => text.replace(/(?<![\/\w])([A-Z]{2,6}-\d+)(?![-\w])/g, (ref) => codes.get(ref) || ref)
 
 const jobView = (issue, names, projects = new Map()) => ({
   id: issue.id,
@@ -267,6 +267,25 @@ export async function studioSummary(options) {
     at: Date.now(),
   }
 }
+
+/**
+ * The crew's own records as Paperclip keeps them, for the manager's view: who there is, every job,
+ * the projects with their folders, and what is running now. Nothing here is shaped for a screen.
+ */
+export async function crewRecords(options) {
+  const id = await companyId(options)
+  const [agents, issues, projects, live, runs] = await Promise.all([
+    call(`/companies/${id}/agents`, options),
+    call(`/companies/${id}/issues`, options),
+    orElse(call(`/companies/${id}/projects`, options), []),
+    orElse(call(`/companies/${id}/live-runs`, options), []),
+    orElse(call(`/companies/${id}/heartbeat-runs?limit=${SHOWN_RUNS}&summary=true`, options), []),
+  ])
+  return { agents, issues, projects, live, runs }
+}
+
+/** The newest comments on a job, newest first, as Paperclip gives them. */
+export const jobComments = (jobId, count, options) => orElse(call(`/issues/${jobId}/comments?limit=${count}`, options), [])
 
 /** The crew's scripts post with the owner's board identity and sign with this, so they are not shown as the owner. */
 const SCRIPT_MARK = /\n*<!-- ngen-script: ([^>]+?) -->\s*$/

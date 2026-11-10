@@ -10,6 +10,9 @@ import { focusSoon } from './lib/focus.mjs'
 import { listJobs, runningJobFor, startJob } from './lib/jobs.mjs'
 import { officeSnapshot, missionAction } from './office.mjs'
 import { DEMO } from './demo.mjs'
+import { randomUUID } from 'node:crypto'
+import { studioView } from './lib/studio.mjs'
+import { PaperclipError, chatThread, jobDetail, pauseBot, resumeBot, sendChat } from './lib/paperclip.mjs'
 import {
   defaultHarness,
   harnessStatus,
@@ -488,6 +491,35 @@ function readJsonBody(req, limit = 4 * 1024 * 1024) {
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 const fromThisMachine = (req) => LOOPBACK.has(req.socket?.remoteAddress)
 
+/**
+ * The studio map, where Paperclip runs on this machine: the office by project, and a word with any
+ * bot of the crew. Everywhere else the first answer is `{ on: false }` and the page never asks again.
+ *
+ * Talking to a bot, pausing it and waking it are for the person at this machine, like `/api/message`.
+ */
+async function studioRoute(req, res, url) {
+  const read = req.method === 'GET'
+  try {
+    if (DEMO) return send(res, 200, { on: false })
+    if (url.pathname === '/api/studio' && read) return send(res, 200, await studioView({ scan: async () => reconcileArchived(await scanThreads()) }))
+    if (url.pathname === '/api/studio/chat' && read) return send(res, 200, await chatThread(url.searchParams.get('bot') || ''))
+    if (url.pathname === '/api/studio/job' && read) return send(res, 200, await jobDetail(url.searchParams.get('id') || ''))
+    if (read) return send(res, 404, { error: 'Unknown endpoint' })
+    if (!fromThisMachine(req)) return send(res, 403, { ok: false, error: 'The crew only takes orders from the computer Agent Atrium runs on' })
+    const body = await readJsonBody(req, 64 * 1024)
+    if (url.pathname === '/api/studio/chat' && req.method === 'POST') return send(res, 200, await sendChat(body.bot, body.text, randomUUID()))
+    if (url.pathname === '/api/studio/bot' && req.method === 'POST' && ['pause', 'resume'].includes(body.action)) {
+      return send(res, 200, await (body.action === 'pause' ? pauseBot : resumeBot)(body.bot))
+    }
+    return send(res, 404, { error: 'Unknown endpoint' })
+  } catch (err) {
+    if (!(err instanceof PaperclipError)) throw err
+    // No Paperclip here is the ordinary case, not a fault: the office is simply not a studio.
+    if (url.pathname === '/api/studio' && read) return send(res, 200, { on: false })
+    return send(res, err.status || 502, { ok: false, error: err.message })
+  }
+}
+
 /** Connect-style middleware: handles /api/*, passes everything else through. */
 export async function apiMiddleware(req, res, next) {
   const url = new URL(req.url, 'http://localhost')
@@ -557,6 +589,8 @@ export async function apiMiddleware(req, res, next) {
       }
       return send(res, ...(await sendMessage(body)))
     }
+
+    if (url.pathname.startsWith('/api/studio')) return await studioRoute(req, res, url)
 
     if (url.pathname === '/api/jobs' && req.method === 'GET') {
       return send(res, 200, { jobs: listJobs() })

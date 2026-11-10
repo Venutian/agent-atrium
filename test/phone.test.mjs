@@ -386,6 +386,21 @@ test('the models screen reads every bot\'s model and the free list, and leaves c
   }, { crew })
 })
 
+test('the manager view needs the token and says who is on what', async () => {
+  await withDoor(async (ask) => {
+    assert.equal((await ask('/v1/manager', { token: 'wrong' })).status, 401)
+    assert.equal((await ask('/v1/manager', { method: 'POST', body: {} })).status, 404)
+    const { status, body } = await ask('/v1/manager')
+    assert.equal(status, 200)
+    assert.deepEqual(body.now.map((w) => [w.bot, w.ref, w.stage]), [['Scout', 'CREW-1', 'Building']])
+    assert.ok(body.lines.some((l) => l.ref === 'CREW-2' && l.stage === 'blocked'))
+    assert.ok(body.needsYou.some((n) => n.kind === 'approval'))
+    assert.ok(body.trouble.some((t) => /1 job is blocked/.test(t.text)))
+    assert.equal(JSON.stringify(body).includes('/secret'), false)
+    assert.equal(JSON.stringify(body).includes('hidden'), false)
+  })
+})
+
 test('a new job goes to the director and a bad one is refused', async () => {
   const calls = []
   await withDoor(async (ask) => {

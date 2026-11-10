@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import './ui/styles.css'
+import { Studio, fetchStudio } from './ui/studio.js'
 import { DEFAULT_PRESET, Settings, hasStoredSettings } from './core/settings.js'
 import { Engine } from './core/engine.js'
 import { CameraRig } from './core/camera.js'
@@ -41,6 +42,8 @@ import { formatTokens } from './ui/usage.js'
  */
 
 const POLL_MS = 15000
+/** The studio's answer is a few dozen kilobytes and cached by the server, so it can be asked for often. */
+const STUDIO_POLL_MS = 5000
 const app = document.getElementById('app')
 
 app.insertAdjacentHTML(
@@ -389,6 +392,20 @@ ambience.setStyle(atrium.style)
 atrium.onSound = (name, x, y, z) => ambience.play(name, { x, y, z })
 
 const hud = new Hud(app, settings, actions)
+const studio = new Studio(hud.el, {
+  pickBot: (botId) => {
+    const thread = threads.find((t) => t.crew?.id === botId)
+    if (thread) select(thread.id, { fly: true })
+  },
+  pickJob: (ref) => {
+    const thread = threads.find((t) => t.job === ref && !t.crew)
+    if (thread) select(thread.id, { fly: true })
+    return Boolean(thread)
+  },
+  closed: () => select(null, {}),
+  refresh: () => poll(),
+  toast: (text, kind) => hud.toast(text, kind),
+})
 const alerts = new AttentionAlerts({ document, Notification: window.Notification, onClick: (id) => { window.focus(); select(id, { fly: true }) } })
 /** The panels lean light on a light floor and dark on a dark one. */
 const syncMapTheme = () => document.documentElement.classList.toggle('office-theme', atrium.style.ui === 'light')
@@ -404,6 +421,7 @@ function select(id, { fly = false } = {}) {
   const agent = id ? atrium.agentFor(id) : null
   if (!agent) {
     selectedId = null
+    studio.closeChat()
     rig.setFollow(null)
     atrium.bots.setSelected(null)
     hud.setSelection(null, null)
@@ -413,7 +431,14 @@ function select(id, { fly = false } = {}) {
   }
   atrium.bots.setSelected(agent)
   const thread = threads.find((t) => t.id === id) || agent.thread
-  hud.setSelection(agent, thread)
+  // A bot of the crew is talked to, not opened: its drawer takes the place of the thread card.
+  if (thread.crew) {
+    hud.setSelection(null, null)
+    studio.openChat(thread.crew.id)
+  } else {
+    studio.closeChat()
+    hud.setSelection(agent, thread)
+  }
   syncCompose()
   // It answers. One of six little phrases, from where it is standing, never twice in a row.
   if (agent.id !== lastVoiced) {
@@ -552,8 +577,8 @@ function syncProject() {
  * only changes on resize is the kind of thing that quietly costs a HUD its smoothness.
  */
 const cardAnchor = new THREE.Vector3()
-function screenOf(agent) {
-  bendPoint(cardAnchor.set(agent.pos.x, agent.pos.y + 0.95, agent.pos.z)).project(engine.camera)
+function screenOf(agent, lift = 0.95) {
+  bendPoint(cardAnchor.set(agent.pos.x, agent.pos.y + lift, agent.pos.z)).project(engine.camera)
   if (cardAnchor.z > 1) return null
   const { w, h } = engine.viewport
   return { x: (cardAnchor.x * 0.5 + 0.5) * w, y: (-cardAnchor.y * 0.5 + 0.5) * h }
@@ -938,19 +963,20 @@ window.addEventListener('keydown', (e) => {
       hud.setOrbit(false)
       break
     case 'Enter':
-      if (selectedId) actions.openThread()
+      if (studio.chatBot) { studio.focus(); e.preventDefault() } else if (selectedId) actions.openThread()
       break
+    // A bot of the crew is not a thread: it cannot be archived or marked as read.
     case 'a':
     case 'A':
-      if (selectedId) actions.archiveThread()
+      if (selectedId && !studio.chatBot) actions.archiveThread()
       break
     case 'r':
     case 'R':
-      if (selectedId && hud.focusCompose()) e.preventDefault()
+      if (studio.chatBot) { studio.focus(); e.preventDefault() } else if (selectedId && hud.focusCompose()) e.preventDefault()
       break
     case 'v':
     case 'V':
-      if (selectedId) actions.markViewed()
+      if (selectedId && !studio.chatBot) actions.markViewed()
       break
     case 'c':
     case 'C':
@@ -1072,8 +1098,8 @@ function applyThreads(list) {
   // Keep the card honest if the thread it is showing changed underneath it.
   if (selectedId) {
     const still = atrium.agentFor(selectedId)
-    if (still) hud.setSelection(still, list.find((t) => t.id === selectedId) || still.thread)
-    else select(null, {})
+    if (!still) select(null, {})
+    else if (!still.thread?.crew) hud.setSelection(still, list.find((t) => t.id === selectedId) || still.thread)
   }
   syncCompose()
   // Which also repaints the legend, so the open zone's chip is lit by the same pass.
@@ -1102,7 +1128,8 @@ let planSeq = 0
  * did — a different thread, it starting or stopping a turn, a job starting or ending.
  */
 async function syncCompose(force = false) {
-  const thread = selectedId ? threads.find((t) => t.id === selectedId) : null
+  const picked = selectedId ? threads.find((t) => t.id === selectedId) : null
+  const thread = picked?.crew ? null : picked
   const job = thread ? jobsByThread.get(thread.id) : null
   hud.setReply(job || null)
   if (!thread) {
@@ -1246,12 +1273,29 @@ function frameOffice() {
 }
 
 let polling = false
+/** null until the server has been asked once. */
+let studioMode = null
 async function poll() {
   if (polling) return
   polling = true
   try {
-    const res = await fetchThreads()
-    applyThreads(res.threads || [])
+    // Where a Paperclip crew runs, the map is the studio: rooms are projects, the crew stand in
+    // them, and the list is a few dozen threads instead of every worktree on the disk.
+    const view = studioMode === false ? null : await fetchStudio().catch(() => null)
+    if (studioMode === null) {
+      studioMode = Boolean(view?.on)
+      if (studioMode) studio.mount()
+    }
+    if (studioMode) {
+      // A missed poll keeps the last roster: an empty map would read as an empty studio.
+      if (view?.on) {
+        studio.setView(view)
+        applyThreads(view.threads)
+      }
+    } else {
+      const res = await fetchThreads()
+      applyThreads(res.threads || [])
+    }
     hud.removeBoot()
   } catch (err) {
     hud.toast(err.message || 'Could not reach the thread scanner', 'err')
@@ -1359,13 +1403,16 @@ async function boot() {
 
   await poll()
   refreshOffice()
-  setInterval(poll, POLL_MS)
-  setInterval(refreshOffice, 30000)
+  // A hidden page asks nothing: it catches up the moment it is looked at again.
+  setInterval(() => { if (!document.hidden) poll() }, studioMode ? STUDIO_POLL_MS : POLL_MS)
+  setInterval(() => { if (!document.hidden) refreshOffice() }, studioMode ? 60000 : 30000)
   watchJobs(0)
   window.addEventListener('focus', poll)
   // A tab that was hidden for an hour should catch up the moment it comes back.
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) poll()
+    if (document.hidden) return
+    poll()
+    studio.wake()
   })
 
   let seenHelp = false
@@ -1373,7 +1420,8 @@ async function boot() {
     seenHelp = Boolean(localStorage.getItem('agentatrium.seen-help'))
     localStorage.setItem('agentatrium.seen-help', '1')
   } catch { /* private mode: show the sheet, it costs one click */ }
-  if (!seenHelp) hud.toggleHelp(true)
+  if (studioMode) hud.hint('Click a bot of the crew to talk to it · drag to move', 5200)
+  else if (!seenHelp) hud.toggleHelp(true)
   else hud.hint('Drag to move · click a bot · Tab changes the office style', 5200)
 }
 
@@ -1422,6 +1470,7 @@ engine.add({
       if (!agent) select(null, {})
       else hud.placeCard(screenOf(agent))
     }
+    studio.placeTags(atrium.bots.agents, screenOf)
     hud.setFps(engine.perf, engine.viewport, `${atrium.bots.visibleCount} bots · ${atrium.particles.liveCount} bits`)
     ambience.update(dt, engine.camera, soundWorld())
   },

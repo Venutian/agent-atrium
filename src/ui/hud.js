@@ -604,7 +604,9 @@ export class Hud {
       b.addEventListener('click', () => this.actions.pickProject?.(p.name))
       wrap.appendChild(b)
     }
-    this.$('.sec-head span').textContent = `${projects.length} repo${projects.length === 1 ? '' : 's'}`
+    // In a studio the rooms are projects, not folders.
+    const room = this.el.classList.contains('studio') ? 'project' : 'repo'
+    this.$('.sec-head span').textContent = `${projects.length} ${room}${projects.length === 1 ? '' : 's'}`
 
     // The hidden list is its own block at the foot of the sidebar: collapsed by default, because
     // the whole point of hiding a repo is not to look at it.

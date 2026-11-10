@@ -21,7 +21,7 @@ const PINNED = [
 ]
 const DIFF = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames']
 
-function git(cwd, args) {
+export function git(cwd, args) {
   return new Promise((resolve, reject) => {
     execFile('git', ['-C', cwd, ...PINNED, ...args], {
       timeout: TIME_LIMIT_MS,

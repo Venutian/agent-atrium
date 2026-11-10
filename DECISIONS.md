@@ -182,3 +182,17 @@ hold a key, reads `edge.json` for it, and counts wrong keys against the phone's 
 Worker passes on, since every request through the tunnel arrives from loopback. Cloudflare can
 read this traffic, so WireGuard stays as the private way, and the app prefers home Wi-Fi, then
 WireGuard, then Cloudflare.
+
+## Where a Paperclip crew runs, the office is a studio
+
+A machine that runs a Paperclip crew gives every job its own worktree, so "one room per folder,
+one bot per thread" drew hundreds of rooms and bots for a crew of ten. There, `/api/studio`
+answers `on: true` and the page draws that instead: a room per Paperclip project, the crew's
+bots as the characters in them, the sessions working a job as their smaller helpers, and only
+what moved lately. Everywhere else it answers `on: false` and nothing changes. The roster is a
+pure function (`studioRoster`), the answer is cached and a few dozen kilobytes, and the page
+polls it instead of the full thread list.
+
+The crew can be talked to, paused and resumed from the map (`/api/studio/chat`,
+`/api/studio/bot`). Those go to Paperclip's own API on this machine, never into a harness's
+files, and are accepted only from this machine, like every other write the office makes.

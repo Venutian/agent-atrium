@@ -1488,7 +1488,7 @@ export class Bots {
       e.set(0, agent.yaw, 0)
       q.setFromEuler(e)
       v.set(agent.pos.x, agent.pos.y, agent.pos.z)
-      root.compose(v, q, one.setScalar(s * CREW_SCALE))
+      root.compose(v, q, one.setScalar(s * CREW_SCALE * (agent.thread?.size || 1)))
       one.setScalar(1)
 
       if (crew) {
@@ -1589,7 +1589,7 @@ export class Bots {
 
     for (const agent of this._drawnAgents) {
       if (agent.scale < 0.3 || agent.state === 'gone') continue
-      const scale = agent.scale * CREW_SCALE
+      const scale = agent.scale * CREW_SCALE * (agent.thread?.size || 1)
       this._e.set(0, agent.yaw, 0)
       this._q.setFromEuler(this._e)
       this._m.compose(agent.pos, this._q, this._one.setScalar(scale))

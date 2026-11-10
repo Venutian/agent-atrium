@@ -17,6 +17,7 @@ import { changeCounts, changeDetail } from './lib/changes.mjs'
 import { cameThroughEdge, edgeFile, readEdge, signPlay } from './lib/edge.mjs'
 import { addDevice, deviceView, devicesFile, findDevice, readDevices, retireShared, revokeDevice, touchDevice } from './lib/devices.mjs'
 import { guardFolder, readGuard, writeGuard } from './lib/guard.mjs'
+import { managerSummary } from './lib/manager.mjs'
 import { crewFolder, readModels } from './lib/models.mjs'
 import { readPlans } from './lib/plans.mjs'
 import {
@@ -38,6 +39,7 @@ const ROUTINE_ACTIONS = { run: runRoutine, pause: pauseRoutine, resume: resumeRo
 const SEEN_EVERY_MS = 60 * 1000
 const SESSIONS_TTL_MS = 60 * 1000
 const SESSIONS_WAIT_MS = 700
+const MANAGER_FRESH_MS = 4_000
 
 const digest = (value) => createHash('sha256').update(String(value)).digest()
 const waitUpTo = (ms) => new Promise((resolve) => {
@@ -144,6 +146,7 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
   // yet waits for Paperclip rather than sending an empty studio.
   const summaryCache = { at: 0, value: null, error: null, running: null }
   const chatsCache = { at: 0, value: null, error: null, running: null }
+  const managerCache = { at: 0, value: null, error: null, running: null }
 
   const buildSummary = async (options) => {
     const [summary, live, plans] = await Promise.all([studioSummary(options), recentSessions(), readPlans()])
@@ -208,6 +211,34 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
       return seen.error ? { ...seen.value, error: seen.error } : seen.value
     }
     return refreshSummary(options)
+  }
+
+  /**
+   * The manager's view (who is on what, where each piece of work stands, what happened today),
+   * kept the same way. Both the phone's Home and the 3D map ask for it every few seconds, so an
+   * answer younger than MANAGER_FRESH_MS is not rebuilt.
+   */
+  const refreshManager = (options) => {
+    if (managerCache.running) return managerCache.running
+    managerCache.running = Promise.all([managerSummary({ folder: crew, ...options }), summarySoon(options).catch(() => null)])
+      .then(([manager, summary]) => {
+        managerCache.value = { ...manager, needsYou: summary?.needsYou || [] }
+        managerCache.at = Date.now()
+        managerCache.error = null
+        return managerCache.value
+      })
+      .catch((err) => {
+        managerCache.error = err?.message || 'Paperclip is not running on this machine'
+        throw err
+      })
+      .finally(() => { managerCache.running = null })
+    return managerCache.running
+  }
+  const managerSoon = async (options) => {
+    const seen = managerCache
+    if (!seen.value) return refreshManager(options)
+    if (Date.now() - seen.at > MANAGER_FRESH_MS) refreshManager(options).catch(() => undefined)
+    return seen.error ? { ...seen.value, error: seen.error } : seen.value
   }
 
   /** The chat list, the same way: at once when there is one, the error when there is not. */
@@ -290,6 +321,7 @@ export function phoneHandler({ token, paperclip = {}, sessions = liveSessions, p
         })
       }
       if (pathname === '/v1/summary' && req.method === 'GET') return send(res, 200, await summarySoon(options))
+      if (pathname === '/v1/manager' && req.method === 'GET') return send(res, 200, await managerSoon(options))
       if (pathname === '/v1/jobs' && req.method === 'POST') {
         return send(res, 201, await addJob(await readBody(req), options))
       }

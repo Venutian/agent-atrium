@@ -308,7 +308,8 @@ export class Atrium {
     const dormant = new Set()
     if (this.settings.get('hideDormant')) {
       for (const [name, list] of byProject) {
-        if (!this.sessionReveals?.has(name) && list.every((t) => statusFor(t, now) === 'sleeping')) dormant.add(name)
+        // A room one of the crew stands in is staffed, asleep or not: it stays on the map.
+        if (!this.sessionReveals?.has(name) && list.every((t) => !t.crew && statusFor(t, now) === 'sleeping')) dormant.add(name)
       }
       // Never fold away everything: an atrium that answers a poll with an empty planet reads as
       // broken rather than tidy, and there is nothing on screen to tell you which it was.
